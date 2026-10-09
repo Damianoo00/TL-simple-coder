@@ -97,6 +97,10 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
 }
 } // namespace
 
+void JsonGraphParser::validateJson(std::string_view document) {
+    readDefinitions(nlohmann::json::parse(document));
+}
+
 std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& filename) {
     try {
         std::ifstream file(filename);

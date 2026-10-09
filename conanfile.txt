@@ -1,5 +1,6 @@
 [requires]
 nlohmann_json/3.12.0
+crowcpp-crow/1.3.2
 
 [generators]
 PkgConfigDeps

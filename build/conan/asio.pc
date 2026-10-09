@@ -1,0 +1,8 @@
+prefix=/home/damian/.conan2/p/asio8b50208abaabe/p
+includedir=${prefix}/include
+
+Name: asio
+Description: Conan package: asio
+Version: 1.29.0
+Libs: -lpthread
+Cflags: -I"${includedir}" -DASIO_STANDALONE

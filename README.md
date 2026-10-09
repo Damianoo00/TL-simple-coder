@@ -1,7 +1,7 @@
 # Budowanie i uruchamianie
 
 Projekt wymaga systemu POSIX (np. Linux), GNU Make, GCC z obsługą C++20,
-Conana 2 oraz `pkg-config`. Zależność `nlohmann_json/3.12.0` jest zadeklarowana
+Conana 2 oraz `pkg-config`. Zależności `nlohmann_json/3.12.0` i `crowcpp-crow/1.3.2` są zadeklarowane
 w `conanfile.txt`; generator `PkgConfigDeps` przekazuje ścieżki nagłówków do Makefile.
 
 ```sh
@@ -14,8 +14,8 @@ make run
 Makefile tworzy dwa oddzielne programy:
 
 - `graph_worker` — uruchamia graf i czeka na SIGTERM lub SIGINT;
-- `supervisor` — uruchamia trzy procesy `graph_worker`, po 5 sekundach wysyła
-  do nich SIGTERM i odbiera ich zakończenie przez `waitpid`.
+- `supervisor` — udostępnia API HTTP w Crow, uruchamia osobny proces
+  `graph_worker` dla każdego POST i odbiera zakończone procesy przez `waitpid`.
 
 `make` automatycznie instaluje zależności w `build/conan`. Można wykonać ten
 krok osobno przez `make deps`, a opcje Conana przekazać np.
@@ -35,9 +35,54 @@ Można podać bezwzględną ścieżkę workera, aby uruchomić supervisor z inne
 ```
 
 Bez argumentu supervisor używa `./graph_worker` względem bieżącego katalogu.
-Ctrl+C lub SIGTERM skraca oczekiwanie i powoduje zamknięcie procesów potomnych.
-Błąd uruchomienia workera jest wypisywany na stderr; supervisor zwraca kod 1
-i zamyka wcześniej uruchomione procesy.
+Supervisor działa do Ctrl+C lub SIGTERM i wtedy zamyka procesy potomne.
+Wysyła SIGTERM, czeka do 2 sekund na każdego workera, a w razie potrzeby
+używa SIGKILL. Błąd `posix_spawn` daje odpowiedź HTTP 500.
+
+## API Supervisora
+
+Domyślnie API nasłuchuje na `127.0.0.1:8080`. Port możesz podać jako drugi argument:
+
+```sh
+./supervisor ./graph_worker 9090
+```
+
+Supervisor nie uruchamia grafów automatycznie. Wyślij istniejącą konfigurację:
+
+```sh
+curl -i -X POST http://127.0.0.1:8080/graphs \
+  -H 'Content-Type: application/json' \
+  --data-binary @config.json
+
+curl http://127.0.0.1:8080/graphs
+curl http://127.0.0.1:8080/graphs/1
+curl -X DELETE http://127.0.0.1:8080/graphs/1
+```
+
+| Endpoint | Wynik |
+|---|---|
+| `POST /graphs` | `202 Accepted`, `graph_id`, `pid`, `status: starting`, nagłówek `Location` |
+| `GET /graphs` | Lista wszystkich grafów z bieżącej sesji, także zakończonych |
+| `GET /graphs/{id}` | Status procesu i opcjonalnie `exit_code` lub `signal`; 404 dla nieznanego ID |
+| `DELETE /graphs/{id}` | Zatrzymanie procesu i jego status; powtórzenie jest bezpieczne; 404 dla nieznanego ID |
+
+POST przyjmuje bezpośrednio dokument JSON w formacie `config.json`, bez dodatkowego
+opakowania. Zła składnia lub struktura grafu daje 400, niewłaściwy Content-Type
+415, a body powyżej 1 MiB — 413 (limit jest sprawdzany po odebraniu body).
+Walidacja w supervisorze nie otwiera ani nie nadpisuje plików węzłów.
+Konfiguracja jest zapisywana w prywatnym katalogu tymczasowym i przekazywana jako
+argument do workera. Po zakończeniu procesu plik konfiguracji jest usuwany.
+
+`202` potwierdza utworzenie procesu, a nie gotowość grafu. Status `running` oznacza,
+że proces jeszcze się nie zakończył; nie jest potwierdzeniem zakończenia inicjalizacji.
+Błąd konfiguracji zasobów (np. brak pliku wejściowego) powoduje status `failed`
+z kodem zakończenia. `stopped` oznacza poprawne zakończenie lub zatrzymanie przez API.
+Szczegóły błędów workera trafiają na stderr Supervisora. Rejestr oraz ID są
+przechowywane w pamięci i zaczynają się od nowa po restarcie.
+
+Ścieżki plików węzłów nadal są rozwiązywane względem katalogu roboczego Supervisora.
+Przy wielu grafach nadaj każdemu osobny plik wyjściowy. API jest lokalne i nie
+wymaga uwierzytelnienia; konfiguracje mają dostęp do plików z uprawnieniami procesu.
 
 Sam worker:
 
@@ -57,7 +102,7 @@ ale ich wątki jeszcze nie pracują. Domyślna konfiguracja ma kolejność
 `InputNode -> Node -> OutputNode`. `InputNode::process()` odczytuje
 jedną liczbę całkowitą typu `int` z kolejnej linii `input.txt` i wysyła ją do
 kolejki następnego węzła. Plik jest otwierany względem bieżącego katalogu;
-uruchamiaj program z katalogu projektu. Każdy z trzech workerów czyta cały plik
+uruchamiaj program z katalogu projektu. Każdy uruchomiony worker czyta cały plik
 niezależnie. Dołączony plik zawiera liczby od 1 do 8. Przy otwieraniu pliku
 worker wypisuje jego pełną ścieżkę. Zapisz zmiany pliku w edytorze przed
 uruchomieniem; zmiana danych lub konfiguracji nie wymaga ponownej kompilacji.
@@ -108,7 +153,6 @@ każdego procesu, aby uniknąć nadpisywania wyników.
 - `Graph::stop()` zamyka węzły w kolejności dodania. Aby opróżnić cały potok,
   dodawaj węzły od źródła do odbiornika, jak w obecnym przykładzie. Dowolna
   kolejność lub cykle wymagają odrębnego mechanizmu zamykania grafu.
-- Klasa `Supervisor` zarządza startem i zamykaniem procesów, ale nie restartuje
-  workera po awarii ani nie sprawdza jego kodu zakończenia. `stopAll()` czeka
-  bez limitu czasu, więc zakleszczony worker może zablokować zamykanie.
+- Klasa `Supervisor` synchronizuje rejestr procesów, odbiera zakończone dzieci
+  i udostępnia ich kod zakończenia lub sygnał. Nie restartuje workera po awarii.
 - Jest to własny supervisor w C++, niezależny od zewnętrznego `supervisord`.
