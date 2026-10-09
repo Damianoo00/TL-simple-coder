@@ -6,7 +6,7 @@ LDLIBS ?=
 
 TARGETS := graph_worker supervisor
 BUILD_DIR := build
-SOURCES := Node.cpp InputNode.cpp GraphWorker.cpp Supervisor.cpp
+SOURCES := Node.cpp InputNode.cpp OutputNode.cpp GraphWorker.cpp Supervisor.cpp
 OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 DEPS := $(OBJECTS:.o=.d)
 
@@ -14,7 +14,7 @@ DEPS := $(OBJECTS:.o=.d)
 
 all: $(TARGETS)
 
-graph_worker: $(BUILD_DIR)/Node.o $(BUILD_DIR)/InputNode.o $(BUILD_DIR)/GraphWorker.o
+graph_worker: $(BUILD_DIR)/Node.o $(BUILD_DIR)/InputNode.o $(BUILD_DIR)/OutputNode.o $(BUILD_DIR)/GraphWorker.o
 	$(CXX) $(LDFLAGS) -pthread $^ $(LDLIBS) -o $@
 
 supervisor: $(BUILD_DIR)/Supervisor.o

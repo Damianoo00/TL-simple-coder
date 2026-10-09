@@ -54,6 +54,22 @@ zamknięcia. Pusta linia, tekst lub wartość poza zakresem `int` powodują komu
 z numerem linii i zakończenie odczytu. Brak pliku powoduje zakończenie workera
 z kodem 1.
 
+Do zapisu wartości do pliku służy `OutputNode` (nagłówek `OutputNode.hpp`).
+Dodaj go jako ostatni węzeł i połącz z poprzednim przed startem grafu:
+
+```cpp
+OutputNode& output = graph.addNode<OutputNode>();
+output.configure({{"filename", "output.txt"}});
+graph.connect(node2, output);
+```
+
+Konfiguracja tworzy plik lub nadpisuje jego dotychczasową zawartość.
+`OutputNode::process()` odbiera jedną liczbę z kolejki wejściowej, zapisuje ją
+w osobnej linii i opróżnia bufor pliku. Błąd otwarcia zgłasza wyjątkiem,
+a błąd zapisu komunikatem na stderr i zakończeniem wątku. Konfigurację należy
+wykonać przed startem. Przy pracy wielu workerów używaj osobnego pliku dla
+każdego procesu, aby uniknąć nadpisywania wyników.
+
 ## Uwagi do kodu
 
 - Oba pliki `GraphWorker.cpp` i `Supervisor.cpp` zawierają `main()`, dlatego

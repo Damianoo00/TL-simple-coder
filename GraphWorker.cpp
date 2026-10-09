@@ -1,6 +1,7 @@
 
 #include "Graph.hpp"
 #include "InputNode.hpp"
+#include "OutputNode.hpp"
 #include <exception>
 #include <cstdio>
 #include <csignal>
@@ -24,10 +25,11 @@ int main() try {
     InputNode& input = graph.addNode<InputNode>();
     input.configure({{"filename", "input.txt"}});
     Node& node1 = graph.addNode();
-    Node& node2 = graph.addNode();
+    OutputNode& output = graph.addNode<OutputNode>();
+    output.configure({{"filename", "output.txt"}});
 
     graph.connect(input, node1);
-    graph.connect(node1, node2);
+    graph.connect(node1, output);
 
     graph.start();
 
