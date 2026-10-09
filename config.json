@@ -1,0 +1,26 @@
+{
+    "graph": [
+                {
+                    "type": "InputNode", 
+                    "name": "input", 
+                    "configuration": [
+                        {"filename": "input.txt"}
+                    ],
+                    "connections": ["node2"]
+                },
+                {
+                    "type": "Node", 
+                    "name": "node2", 
+                    "configuration": [],
+                    "connections": ["output"]
+                },
+                {
+                    "type": "OutputNode", 
+                    "name": "output", 
+                    "configuration": [
+                        {"filename": "output.txt"}
+                    ],
+                    "connections": []
+                }
+            ]
+}

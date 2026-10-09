@@ -1,7 +1,5 @@
 
-#include "Graph.hpp"
-#include "InputNode.hpp"
-#include "OutputNode.hpp"
+#include "JsonGraphParser.hpp"
 #include <exception>
 #include <cstdio>
 #include <csignal>
@@ -15,23 +13,17 @@ extern "C" void handle_signal(int) {
     stop_requested = 1;
 }
 
-int main() try {
+int main(int argc, char* argv[]) try {
+    if (argc > 2) {
+        std::fprintf(stderr, "Usage: %s [config.json]\n", argv[0]);
+        return 1;
+    }
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
     std::signal(SIGTERM, handle_signal);
     std::signal(SIGINT, handle_signal);
 
-    Graph graph;
-
-    InputNode& input = graph.addNode<InputNode>();
-    input.configure({{"filename", "input.txt"}});
-    Node& node1 = graph.addNode();
-    OutputNode& output = graph.addNode<OutputNode>();
-    output.configure({{"filename", "output.txt"}});
-
-    graph.connect(input, node1);
-    graph.connect(node1, output);
-
-    graph.start();
+    auto graph = JsonGraphParser::parseFile(argc == 2 ? argv[1] : "config.json");
+    graph->start();
 
     printf("Graph started, PID: %ld\n",
            static_cast<long>(getpid()));
@@ -42,7 +34,7 @@ int main() try {
         );
     }
 
-    graph.stop();
+    graph->stop();
 
     printf("Graph stopped, PID: %ld\n",
            static_cast<long>(getpid()));

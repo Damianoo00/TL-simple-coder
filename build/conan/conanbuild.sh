@@ -1,0 +1,1 @@
+. "/home/damian/Documents/cpp_testy/async_nodes/build/conan/conanbuildenv-release-x86_64.sh"

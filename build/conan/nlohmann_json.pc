@@ -1,0 +1,7 @@
+prefix=/tmp/async-nodes-conan-cache/p/nlohmd014ef7748f4b/p
+includedir=${prefix}/include
+
+Name: nlohmann_json
+Description: Conan package: nlohmann_json
+Version: 3.12.0
+Cflags: -I"${includedir}"

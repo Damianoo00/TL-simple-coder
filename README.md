@@ -1,9 +1,13 @@
 # Budowanie i uruchamianie
 
-Projekt wymaga systemu POSIX (np. Linux), GNU Make oraz GCC z obsługą C++20.
+Projekt wymaga systemu POSIX (np. Linux), GNU Make, GCC z obsługą C++20,
+Conana 2 oraz `pkg-config`. Zależność `nlohmann_json/3.12.0` jest zadeklarowana
+w `conanfile.txt`; generator `PkgConfigDeps` przekazuje ścieżki nagłówków do Makefile.
 
 ```sh
+conan profile detect # Tylko przy pierwszym użyciu Conana, jeżeli nie ma profilu default.
 make -j2
+make test
 make run
 ```
 
@@ -12,6 +16,11 @@ Makefile tworzy dwa oddzielne programy:
 - `graph_worker` — uruchamia graf i czeka na SIGTERM lub SIGINT;
 - `supervisor` — uruchamia trzy procesy `graph_worker`, po 5 sekundach wysyła
   do nich SIGTERM i odbiera ich zakończenie przez `waitpid`.
+
+`make` automatycznie instaluje zależności w `build/conan`. Można wykonać ten
+krok osobno przez `make deps`, a opcje Conana przekazać np.
+`make CONAN_FLAGS="-pr:h=default -s:h build_type=Debug"`.
+Po zmianie profilu lub ustawień usuń poprzednie artefakty przez `make clean`.
 
 Bezpośrednie uruchomienie z katalogu projektu:
 
@@ -35,19 +44,36 @@ Sam worker:
 ```sh
 ./graph_worker
 # Zakończ przez Ctrl+C.
+
+# Alternatywny plik konfiguracji:
+./graph_worker /ścieżka/do/config.json
 ```
 
 `make clean` usuwa pliki budowania i utworzone programy.
 
-Graf ma kolejność `InputNode -> Node -> Node`. Nazwę pliku przekazuje się przed
-startem przez `input.configure({{"filename", "input.txt"}})`; konstruktor
-`InputNode` nie przyjmuje argumentów. `InputNode::process()` odczytuje
+Graf jest tworzony przez `JsonGraphParser::parseFile()` na podstawie `config.json`.
+Metoda zwraca `std::unique_ptr<Graph>`; węzły są skonfigurowane i połączone,
+ale ich wątki jeszcze nie pracują. Domyślna konfiguracja ma kolejność
+`InputNode -> Node -> OutputNode`. `InputNode::process()` odczytuje
 jedną liczbę całkowitą typu `int` z kolejnej linii `input.txt` i wysyła ją do
 kolejki następnego węzła. Plik jest otwierany względem bieżącego katalogu;
 uruchamiaj program z katalogu projektu. Każdy z trzech workerów czyta cały plik
 niezależnie. Dołączony plik zawiera liczby od 1 do 8. Przy otwieraniu pliku
 worker wypisuje jego pełną ścieżkę. Zapisz zmiany pliku w edytorze przed
-uruchomieniem; zmiana danych nie wymaga ponownej kompilacji.
+uruchomieniem; zmiana danych lub konfiguracji nie wymaga ponownej kompilacji.
+
+Konfiguracja zawiera niepustą tablicę `graph`. Każdy węzeł ma unikalną,
+niepustą nazwę `name`, `type` (`InputNode`, `Node` albo `OutputNode`),
+tablicę `configuration` obiektów z parametrami tekstowymi oraz tablicę
+`connections` z nazwą następnego węzła lub pustą dla końca grafu.
+`InputNode` i `OutputNode` wymagają niepustego parametru `filename`.
+Powtarzające się klucze między obiektami `configuration` są odrzucane.
+Obecne węzły mają jeden port wyjściowy, dlatego dozwolone jest najwyżej jedno
+połączenie wychodzące. Połączenia mogą wskazywać węzły opisane dalej w pliku.
+Parser sprawdza strukturę i wszystkie odwołania przed konfiguracją węzłów;
+błąd konfiguracji jest wypisywany na stderr, a worker kończy się kodem 1.
+Ścieżka konfiguracji oraz względne ścieżki `filename` są rozwiązywane względem
+bieżącego katalogu procesu. Węzły są dodawane w kolejności tablicy `graph`.
 
 Koniec pliku kończy wątek wejściowy; proces workera nadal czeka na sygnał
 zamknięcia. Pusta linia, tekst lub wartość poza zakresem `int` powodują komunikat
