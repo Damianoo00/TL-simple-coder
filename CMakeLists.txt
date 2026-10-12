@@ -6,20 +6,20 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Crow CONFIG REQUIRED)
 
 add_library(graph_core STATIC
-    Node.cpp
-    InputNode.cpp
-    OutputNode.cpp
-    JsonGraphParser.cpp
+    core/Node.cpp
+    nodes/InputNode.cpp
+    nodes/OutputNode.cpp
+    api/JsonGraphParser.cpp
 )
 target_compile_features(graph_core PUBLIC cxx_std_20)
 set_target_properties(graph_core PROPERTIES CXX_EXTENSIONS OFF)
 target_include_directories(graph_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(graph_core PUBLIC Threads::Threads nlohmann_json::nlohmann_json)
 
-add_executable(graph_worker GraphWorker.cpp)
+add_executable(graph_worker api/GraphWorker.cpp)
 target_link_libraries(graph_worker PRIVATE graph_core)
 
-add_executable(supervisor Supervisor.cpp)
+add_executable(supervisor api/Supervisor.cpp)
 target_link_libraries(supervisor PRIVATE graph_core Crow::Crow)
 
 foreach(target graph_core graph_worker supervisor)

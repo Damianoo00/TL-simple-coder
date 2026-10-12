@@ -131,7 +131,7 @@ zamknięcia. Pusta linia, tekst lub wartość poza zakresem `int` powodują komu
 z numerem linii i zakończenie odczytu. Brak pliku powoduje zakończenie workera
 z kodem 1.
 
-Do zapisu wartości do pliku służy `OutputNode` (nagłówek `OutputNode.hpp`).
+Do zapisu wartości do pliku służy `OutputNode` (nagłówek `nodes/OutputNode.hpp`).
 Dodaj go jako ostatni węzeł i połącz z poprzednim przed startem grafu:
 
 ```cpp
@@ -149,7 +149,7 @@ każdego procesu, aby uniknąć nadpisywania wyników.
 
 ## Uwagi do kodu
 
-- Oba pliki `GraphWorker.cpp` i `Supervisor.cpp` zawierają `main()`, dlatego
+- Oba pliki `api/GraphWorker.cpp` i `api/Supervisor.cpp` zawierają `main()`, dlatego
   muszą być linkowane do oddzielnych programów.
 - `ThreadSafeQueue` po zamknięciu pozwala odebrać pozostałe elementy, a następnie
   zwraca `std::nullopt`. Kolejki nie można ponownie otworzyć.

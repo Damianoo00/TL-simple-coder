@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Graph.hpp"
+#include "core/Graph.hpp"
 
 #include <filesystem>
 #include <memory>

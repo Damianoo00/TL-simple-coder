@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Node.hpp"
+#include "core/Node.hpp"
 
 #include <cstddef>
 #include <fstream>

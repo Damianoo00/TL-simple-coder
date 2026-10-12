@@ -1,7 +1,7 @@
 #include "JsonGraphParser.hpp"
 
-#include "InputNode.hpp"
-#include "OutputNode.hpp"
+#include "nodes/InputNode.hpp"
+#include "nodes/OutputNode.hpp"
 
 #include <nlohmann/json.hpp>
 
