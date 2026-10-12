@@ -2,61 +2,41 @@
 
 #include <cstdio>
 
-Node::Node() {
-    init();
-}
-
-Node::~Node() {
+NodeBase::~NodeBase() {
     stop();
 }
 
-void Node::init() {
-    m_input.push_back(std::make_shared<ThreadSafeQueue<int>>());
-    m_output.push_back(nullptr);
+void NodeBase::configure(std::unordered_map<std::string, std::string>) {}
+
+void NodeBase::connect(NodeBase& next, std::size_t output_port,
+                       std::size_t input_port) {
+    const auto expected = m_output_types.at(output_port);
+    const auto& queue = next.m_input.at(input_port);
+    if (expected != std::type_index(typeid(*queue)))
+        throw std::invalid_argument("Incompatible node port types");
+    m_output.at(output_port) = queue;
 }
 
-void Node::configure(std::unordered_map<std::string, std::string> config) {
-    return;
+void NodeBase::closeOutputs() {
+    for (auto& output : m_output) {
+        if (output) output->close();
+    }
 }
 
-void Node::connect(const Node& next, std::size_t output_port, std::size_t input_port){
-    m_output.at(output_port) = next.m_input.at(input_port);
-}
-
-void Node::start() {
-    if (m_worker.joinable())
-        return;
-
+void NodeBase::start() {
+    if (m_worker.joinable()) return;
     m_worker = std::thread([this]() {
-        int res{0};
-        while (true) {
-            if (res = process(); res < 0){
-                break;
-            }
+        try {
+            while (process() >= 0) {}
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "Node: %s\n", error.what());
         }
+        closeOutputs();
     });
 }
 
-void Node::stop() {
+void NodeBase::stop() {
     m_stop_requested = true;
-    for (auto input : m_input){
-        input->close();
-    }
-    
-
-    if (m_worker.joinable()) {
-        m_worker.join();
-    }
-}
-
-int Node::process() {
-    auto value = m_input.at(0)->pop();
-    if (!value)
-        return -1;
-    if (m_output.at(0)) {
-        m_output.at(0)->push(value.value());
-    } else {
-        std::printf("End of graph: %d\n", value.value());
-    }
-    return 0;
+    for (auto& input : m_input) input->close();
+    if (m_worker.joinable()) m_worker.join();
 }

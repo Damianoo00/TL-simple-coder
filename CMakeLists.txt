@@ -4,6 +4,7 @@ project(async_nodes LANGUAGES CXX)
 find_package(Threads REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Crow CONFIG REQUIRED)
+find_package(ffmpeg CONFIG REQUIRED)
 
 add_library(graph_core STATIC
     core/Node.cpp
@@ -14,7 +15,7 @@ add_library(graph_core STATIC
 target_compile_features(graph_core PUBLIC cxx_std_20)
 set_target_properties(graph_core PROPERTIES CXX_EXTENSIONS OFF)
 target_include_directories(graph_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(graph_core PUBLIC Threads::Threads nlohmann_json::nlohmann_json)
+target_link_libraries(graph_core PUBLIC Threads::Threads nlohmann_json::nlohmann_json ffmpeg::avformat ffmpeg::avcodec ffmpeg::avutil)
 
 add_executable(graph_worker api/GraphWorker.cpp)
 target_link_libraries(graph_worker PRIVATE graph_core)
@@ -38,12 +39,19 @@ add_custom_target(run
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(test_media_protocol tests/test_media_protocol.cpp)
+    target_link_libraries(test_media_protocol PRIVATE graph_core)
+    add_executable(test_typed_nodes tests/test_typed_nodes.cpp)
+    target_link_libraries(test_typed_nodes PRIVATE graph_core)
+    add_test(NAME typed_nodes COMMAND test_typed_nodes)
+    set_tests_properties(typed_nodes PROPERTIES TIMEOUT 10)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME integration
         COMMAND "${CMAKE_COMMAND}" -E env
             "PYTHONDONTWRITEBYTECODE=1"
             "GRAPH_WORKER=$<TARGET_FILE:graph_worker>"
             "SUPERVISOR=$<TARGET_FILE:supervisor>"
+            "MEDIA_PROTOCOL_TEST=$<TARGET_FILE:test_media_protocol>"
             "${Python3_EXECUTABLE}" -m unittest discover
             -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -p "test_*.py"
     )

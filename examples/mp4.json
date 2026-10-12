@@ -1,0 +1,26 @@
+{
+  "graph": [
+    {
+      "type": "InputNode",
+      "name": "input",
+      "configuration": [
+        {
+          "filename": "input.mp4"
+        }
+      ],
+      "connections": [
+        "output"
+      ]
+    },
+    {
+      "type": "OutputNode",
+      "name": "output",
+      "configuration": [
+        {
+          "filename": "output.mp4"
+        }
+      ],
+      "connections": []
+    }
+  ]
+}

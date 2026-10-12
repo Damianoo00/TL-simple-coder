@@ -2,7 +2,7 @@
 
 Projekt wymaga systemu POSIX (np. Linux), CMake 3.20 lub nowszego,
 kompilatora z obsługą C++20, Conana 2 oraz Pythona 3 do testów.
-Zależności `nlohmann_json/3.12.0` i `crowcpp-crow/1.3.2` są zadeklarowane
+Zależności `nlohmann_json/3.12.0`, `crowcpp-crow/1.3.2` i `ffmpeg/7.1.5` są zadeklarowane
 w `conanfile.txt`. Generatory `CMakeDeps` i `CMakeToolchain` przygotowują
 pakiety i konfigurację dla CMake.
 
@@ -105,16 +105,17 @@ pozostawiając konfigurację CMake oraz zależności Conana.
 Graf jest tworzony przez `JsonGraphParser::parseFile()` na podstawie `config.json`.
 Metoda zwraca `std::unique_ptr<Graph>`; węzły są skonfigurowane i połączone,
 ale ich wątki jeszcze nie pracują. Domyślna konfiguracja ma kolejność
-`InputNode -> Node -> OutputNode`. `InputNode::process()` odczytuje
-jedną liczbę całkowitą typu `int` z kolejnej linii `input.txt` i wysyła ją do
-kolejki następnego węzła. Plik jest otwierany względem bieżącego katalogu;
-uruchamiaj program z katalogu projektu. Każdy uruchomiony worker czyta cały plik
-niezależnie. Dołączony plik zawiera liczby od 1 do 8. Przy otwieraniu pliku
-worker wypisuje jego pełną ścieżkę. Zapisz zmiany pliku w edytorze przed
-uruchomieniem; zmiana danych lub konfiguracji nie wymaga ponownej kompilacji.
+`InputNode -> OutputNode`. `InputNode::process()` odczytuje jeden
+`AVPacket` przez `av_read_frame()` i przekazuje go jako `DATAFRAME` do kolejki
+następnego węzła. Przed danymi wysyła konfiguracje, a na końcu EOF dla każdego
+strumienia.
+Domyślne ścieżki to `input.mp4` i `output.mp4`, rozwiązywane względem bieżącego
+katalogu. Przygotuj plik wejściowy przed uruchomieniem workera. Każdy worker
+czyta cały plik niezależnie. Zmiana danych lub konfiguracji nie wymaga
+ponownej kompilacji.
 
 Konfiguracja zawiera niepustą tablicę `graph`. Każdy węzeł ma unikalną,
-niepustą nazwę `name`, `type` (`InputNode`, `Node` albo `OutputNode`),
+niepustą nazwę `name`, `type` (`InputNode` albo `OutputNode`),
 tablicę `configuration` obiektów z parametrami tekstowymi oraz tablicę
 `connections` z nazwą następnego węzła lub pustą dla końca grafu.
 `InputNode` i `OutputNode` wymagają niepustego parametru `filename`.
@@ -127,25 +128,79 @@ błąd konfiguracji jest wypisywany na stderr, a worker kończy się kodem 1.
 bieżącego katalogu procesu. Węzły są dodawane w kolejności tablicy `graph`.
 
 Koniec pliku kończy wątek wejściowy; proces workera nadal czeka na sygnał
-zamknięcia. Pusta linia, tekst lub wartość poza zakresem `int` powodują komunikat
-z numerem linii i zakończenie odczytu. Brak pliku powoduje zakończenie workera
-z kodem 1.
+zamknięcia. Brak pliku lub niepoprawny plik multimedialny powoduje błąd
+konfiguracji i zakończenie workera z kodem 1.
 
-Do zapisu wartości do pliku służy `OutputNode` (nagłówek `nodes/OutputNode.hpp`).
+Do zapisu MP4 służy `OutputNode` (nagłówek `nodes/OutputNode.hpp`).
 Dodaj go jako ostatni węzeł i połącz z poprzednim przed startem grafu:
 
 ```cpp
 OutputNode& output = graph.addNode<OutputNode>();
-output.configure({{"filename", "output.txt"}});
+output.configure({{"filename", "output.mp4"}});
 graph.connect(node2, output);
 ```
 
 Konfiguracja tworzy plik lub nadpisuje jego dotychczasową zawartość.
-`OutputNode::process()` odbiera jedną liczbę z kolejki wejściowej, zapisuje ją
-w osobnej linii i opróżnia bufor pliku. Błąd otwarcia zgłasza wyjątkiem,
+`OutputNode::process()` odbiera `MediaPacket`, a dla `DATAFRAME` przelicza znaczniki czasu i zapisuje
+pakiet przez `av_interleaved_write_frame()`. Błąd otwarcia zgłasza wyjątkiem,
 a błąd zapisu komunikatem na stderr i zakończeniem wątku. Konfigurację należy
 wykonać przed startem. Przy pracy wielu workerów używaj osobnego pliku dla
 każdego procesu, aby uniknąć nadpisywania wyników.
+
+## Pliki MP4
+
+`InputNode` otwiera plik przez FFmpeg, a `OutputNode` zapisuje kontener MP4.
+Przykład konfiguracji jest w `examples/mp4.json`; ustaw ścieżki do pliku
+wejściowego i wyjściowego:
+
+```sh
+./build/graph_worker examples/mp4.json
+```
+
+Wejście odczytuje opis strumieni i skompresowane pakiety przez `libavformat`.
+Kolejki przenoszą `MediaPacket` z polami `type`, `stream_id`, `config` i `packet`:
+
+- `CONFIGFRAME` — pole `config` zawiera `MediaStream` z parametrami kodeka i `time_base` danego strumienia;
+- `DATAFRAME` — pole `packet` zawiera `AVPacketPtr`, czyli `std::shared_ptr<AVPacket>` zwalniany przez `av_packet_free()`;
+- `ENDFRAME` — EOF danego strumienia, bez danych.
+
+`InputNode` wysyła wszystkie konfiguracje przed danymi, pakiety przeplata
+w kolejności zwracanej przez FFmpeg, a na końcu wysyła EOF dla każdego ID:
+
+```text
+CONFIGFRAME(0), CONFIGFRAME(1), DATAFRAME(0), DATAFRAME(1), ...,
+ENDFRAME(0), ENDFRAME(1)
+```
+
+Przeplatanie nie wymaga ścisłej naprzemienności: audio i wideo mogą mieć różną
+liczbę pakietów. ID wejścia odpowiada `AVPacket::stream_index`. Wyjście mapuje
+ID wiadomości na własne indeksy strumieni; ID nie muszą być kolejnymi liczbami.
+Wszystkie konfiguracje muszą poprzedzać pierwszy `DATAFRAME` lub `ENDFRAME`.
+Wyjście odrzuca nieznane ID, powtórzone konfiguracje/EOF, późne konfiguracje
+oraz dane po EOF danego strumienia. Po EOF wszystkich strumieni finalizuje MP4.
+
+`InputNode` i `OutputNode` dziedziczą bezpośrednio po abstrakcyjnym `NodeBase`.
+Wejście rejestruje wyjście `MediaPacket`, a wyjście rejestruje wejście
+`MediaPacket`. `ThreadSafeQueue<T>` przenosi typowane wiadomości i dziedziczy
+po `QueueBase`, co pozwala sprawdzać typy połączeń dynamicznych.
+Konfiguracja, dane i EOF przechodzą przez tę samą kolejkę.
+Parametry FFmpeg i zarządzanie jego pamięcią są w `nodes/FFmpeg.hpp`;
+`core/Node.hpp` nie zależy od FFmpeg. `int` zwracany z `process()` jest kodem stanu:
+0 oznacza kontynuację, a -1 zakończenie wątku. Wyjście
+przepisuje wszystkie strumienie do kontenera MP4, zachowując kodeki, audio
+oraz znaczniki czasu. To remuksowanie, bez dekodowania klatek, modyfikacji
+obrazu i ponownego kodowania. Kodeki muszą być obsługiwane przez kontener MP4.
+Opcje Conana wyłączają dodatkowe biblioteki kodeków i urządzenia, których
+remuksowanie nie potrzebuje.
+
+Po wysłaniu wszystkich `ENDFRAME` wejście zamyka kolejkę. Każdy węzeł po zakończeniu
+pracy zamyka swoje kolejki wyjściowe. Wyjście zapisuje
+końcowy indeks MP4 po EOF wszystkich strumieni i zamyka plik; worker nadal
+czeka na sygnał. Zatrzymanie grafu przed EOF zamyka kolejki bez generowania
+sztucznego EOF; wyjście finalizuje wtedy odebrane dane jako częściowy plik.
+Plik wyjściowy jest nadpisywany przy konfiguracji; używaj innej ścieżki niż
+plik wejściowy. Testy integracyjne wymagają programów `ffmpeg` i `ffprobe` w PATH
+(w przeciwnym razie są pomijane).
 
 ## Uwagi do kodu
 
@@ -153,12 +208,34 @@ każdego procesu, aby uniknąć nadpisywania wyników.
   muszą być linkowane do oddzielnych programów.
 - `ThreadSafeQueue` po zamknięciu pozwala odebrać pozostałe elementy, a następnie
   zwraca `std::nullopt`. Kolejki nie można ponownie otworzyć.
-- `Node` i `Graph` są obecnie przeznaczone do pojedynczego cyklu start/stop.
-  `init()`, `connect()` i konfigurację topologii należy wykonywać przed startem;
-  zmiana połączeń lub `init()` podczas pracy nie są synchronizowane.
+- `NodeBase` i `Graph` są obecnie przeznaczone do pojedynczego cyklu start/stop.
+  Rejestrację portów, `connect()` i konfigurację należy wykonywać przed startem;
+  zmiana połączeń podczas pracy nie jest synchronizowana.
 - `Graph::stop()` zamyka węzły w kolejności dodania. Aby opróżnić cały potok,
   dodawaj węzły od źródła do odbiornika, jak w obecnym przykładzie. Dowolna
   kolejność lub cykle wymagają odrębnego mechanizmu zamykania grafu.
 - Klasa `Supervisor` synchronizuje rejestr procesów, odbiera zakończone dzieci
   i udostępnia ich kod zakończenia lub sygnał. Nie restartuje workera po awarii.
 - Jest to własny supervisor w C++, niezależny od zewnętrznego `supervisord`.
+
+## Własne węzły
+
+Nowy węzeł dziedziczy bezpośrednio po `NodeBase` i implementuje `process()`.
+W konstruktorze rejestruje swoje kolejki przez `addInput<T>()` i `addOutput<T>()`.
+Przykładowy węzeł może mieć wejście `int` i wyjście `std::string`.
+Dane odbiera przez `input<T>()->pop()` i wysyła przez `output<T>()->push()`.
+Niepołączone wyjście zwraca pusty wskaźnik; sprawdź go, jeśli połączenie jest
+opcjonalne. `NodeBase` zarządza wątkiem, kolejkami i propagacją ich zamknięcia.
+
+```cpp
+auto& input = graph.addNode<InputNode>();
+auto& output = graph.addNode<OutputNode>();
+graph.connect(input, output);
+```
+
+`connect()` i `Graph::connect()` sprawdzają zgodność typów kolejek w czasie
+działania. Parser JSON obsługuje tylko konkretne typy `InputNode` i `OutputNode`;
+typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
+i z wyjścia `OutputNode` przed otwarciem plików.
+W destruktorze własnego węzła wywołaj `stop()` przed zniszczeniem jego zasobów,
+jak robią `InputNode` i `OutputNode`.

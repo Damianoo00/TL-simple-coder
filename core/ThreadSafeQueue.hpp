@@ -6,8 +6,14 @@
 #include <queue>
 #include <utility>
 
+class QueueBase {
+public:
+    virtual ~QueueBase() = default;
+    virtual void close() = 0;
+};
+
 template<typename T>
-class ThreadSafeQueue {
+class ThreadSafeQueue : public QueueBase {
 private:
     std::queue<T> m_queue;
     std::mutex m_mutex;
@@ -45,7 +51,7 @@ public:
         return value;
     }
 
-    void close() {
+    void close() override {
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_closed = true;

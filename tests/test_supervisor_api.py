@@ -10,17 +10,21 @@ import tempfile
 import time
 import unittest
 
+from media_fixture import HAS_MEDIA_TOOLS, create_input, output_ready
+
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = Path(os.environ.get('GRAPH_WORKER', ROOT / 'build' / 'graph_worker')).resolve()
 SUPERVISOR = Path(os.environ.get('SUPERVISOR', ROOT / 'build' / 'supervisor')).resolve()
 
 
+@unittest.skipUnless(HAS_MEDIA_TOOLS, 'Tests require ffmpeg and ffprobe')
 class SupervisorApiTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        (self.root / 'input.txt').write_text('1\n-2\n8\n')
+        create_input(self.root / 'input.mp4')
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             self.port = probe.getsockname()[1]
@@ -63,7 +67,7 @@ class SupervisorApiTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def configuration(self, output='output.txt', input_file='input.txt'):
+    def configuration(self, output='output.mp4', input_file='input.mp4'):
         return {'graph': [
             {'name': 'input', 'type': 'InputNode',
              'configuration': [{'filename': input_file}], 'connections': ['output']},
@@ -88,8 +92,8 @@ class SupervisorApiTests(unittest.TestCase):
 
     def test_pipeline_status_stop_and_shutdown(self):
         graph = self.start()
-        output = self.root / 'output.txt'
-        self.wait_for(lambda: output.exists() and output.read_text() == '1\n-2\n8\n')
+        output = self.root / 'output.mp4'
+        self.wait_for(lambda: output_ready(output))
         path = '/graphs/' + str(graph['graph_id'])
         self.assertEqual(self.request('GET', path)[1]['status'], 'running')
         self.assertEqual(len(self.request('GET', '/graphs')[1]), 1)
@@ -97,14 +101,14 @@ class SupervisorApiTests(unittest.TestCase):
         self.assertEqual(self.request('DELETE', path)[1]['status'], 'stopped')
         with self.assertRaises(ProcessLookupError):
             os.kill(graph['pid'], 0)
-        second = self.start(self.configuration('second.txt'))
+        second = self.start(self.configuration('second.mp4'))
         self.shutdown()
         self.assertEqual(self.process.returncode, 0)
         with self.assertRaises(ProcessLookupError):
             os.kill(second['pid'], 0)
 
     def test_invalid_requests_have_no_side_effects(self):
-        output = self.root / 'output.txt'
+        output = self.root / 'output.mp4'
         output.write_text('keep')
         for body in ('{', '{}', '[]', json.dumps({'graph': []})):
             self.assertEqual(self.request('POST', '/graphs', body)[0], 400)
@@ -119,19 +123,19 @@ class SupervisorApiTests(unittest.TestCase):
         self.assertEqual(self.request('DELETE', '/graphs/999')[0], 404)
 
     def test_worker_failure_is_reported(self):
-        graph = self.start(self.configuration(input_file='missing.txt'))
+        graph = self.start(self.configuration(input_file='missing.mp4'))
         path = '/graphs/' + str(graph['graph_id'])
         self.wait_for(lambda: self.request('GET', path)[1]['status'] == 'failed')
         self.assertEqual(self.request('GET', path)[1]['exit_code'], 1)
 
     def test_concurrent_starts_use_independent_configurations(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            graphs = list(executor.map(lambda i: self.start(self.configuration(f'output-{i}.txt')), range(4)))
+            graphs = list(executor.map(lambda i: self.start(self.configuration(f'output-{i}.mp4')), range(4)))
         self.assertEqual(len({g['graph_id'] for g in graphs}), 4)
         self.assertEqual(len({g['pid'] for g in graphs}), 4)
         for i in range(4):
-            output = self.root / f'output-{i}.txt'
-            self.wait_for(lambda: output.exists() and output.read_text() == '1\n-2\n8\n')
+            output = self.root / f'output-{i}.mp4'
+            self.wait_for(lambda: output_ready(output))
 
     def test_spawn_failure_does_not_register_a_graph(self):
         self.worker.unlink()
@@ -147,8 +151,8 @@ class SupervisorApiTests(unittest.TestCase):
 
     def test_forced_stop_is_bounded(self):
         graph = self.start()
-        output = self.root / 'output.txt'
-        self.wait_for(lambda: output.exists() and output.read_text() == '1\n-2\n8\n')
+        output = self.root / 'output.mp4'
+        self.wait_for(lambda: output_ready(output))
         os.kill(graph['pid'], signal.SIGSTOP)
         started = time.monotonic()
         status, body, _ = self.request('DELETE', '/graphs/' + str(graph['graph_id']))

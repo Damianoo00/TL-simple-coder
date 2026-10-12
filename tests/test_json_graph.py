@@ -8,21 +8,24 @@ import time
 import unittest
 
 
+from media_fixture import HAS_MEDIA_TOOLS, create_input, output_ready
+
+
 WORKER = Path(os.environ.get("GRAPH_WORKER", Path(__file__).resolve().parents[1] / "build" / "graph_worker")).resolve()
 
 
+@unittest.skipUnless(HAS_MEDIA_TOOLS, 'Tests require ffmpeg and ffprobe')
 class JsonGraphTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        (self.root / "input.txt").write_text("1\n-2\n8\n")
+        create_input(self.root / "input.mp4")
         self.config = {"graph": [
             {"type": "InputNode", "name": "input",
-             "configuration": [{"filename": "input.txt"}], "connections": ["middle"]},
-            {"type": "Node", "name": "middle", "configuration": [], "connections": ["output"]},
+             "configuration": [{"filename": "input.mp4"}], "connections": ["output"]},
             {"type": "OutputNode", "name": "output",
-             "configuration": [{"filename": "output.txt"}], "connections": []},
+             "configuration": [{"filename": "output.mp4"}], "connections": []},
         ]}
 
     def write_config(self, configuration, filename="config.json"):
@@ -35,15 +38,15 @@ class JsonGraphTests(unittest.TestCase):
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             deadline = time.monotonic() + 5
-            output = self.root / "output.txt"
+            output = self.root / "output.mp4"
             while time.monotonic() < deadline:
-                if output.exists() and output.read_text() == "1\n-2\n8\n":
+                if output_ready(output):
                     break
                 if process.poll() is not None:
                     self.fail("Worker exited before producing output: " + process.communicate()[1])
                 time.sleep(0.02)
             self.assertTrue(output.exists(), "Worker did not create the output file")
-            self.assertEqual(output.read_text(), "1\n-2\n8\n")
+            self.assertTrue(output_ready(output), "Worker did not produce a complete MP4")
             process.terminate()
             stdout, stderr = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0, stderr)
@@ -63,7 +66,7 @@ class JsonGraphTests(unittest.TestCase):
         self.run_pipeline([str(path)])
 
     def assert_rejected(self, path):
-        output = self.root / "output.txt"
+        output = self.root / "output.mp4"
         output.write_text("keep existing output\n")
         result = subprocess.run([str(WORKER), str(path)], cwd=self.root,
                                 capture_output=True, text=True, timeout=5)
@@ -75,15 +78,17 @@ class JsonGraphTests(unittest.TestCase):
     def test_invalid_configurations_do_not_truncate_output(self):
         mutations = [
             lambda graph: graph[0].update(type="UnknownNode"),
+            lambda graph: graph[0].update(type="Node"),
             lambda graph: graph[1].update(name="input"),
-            lambda graph: graph[2].update(connections=["missing"]),
-            lambda graph: graph[0].update(connections=["middle", "output"]),
-            lambda graph: graph[2].update(configuration=[]),
-            lambda graph: graph[2].update(configuration=[{"filename": 12}]),
-            lambda graph: graph[2].update(configuration={"filename": "output.txt"}),
-            lambda graph: graph[2].update(configuration=[{"filename": "output.txt"}, {"filename": "other.txt"}]),
+            lambda graph: graph[1].update(connections=["missing"]),
+            lambda graph: graph[0].update(connections=["input", "output"]),
+            lambda graph: graph[1].update(configuration=[]),
+            lambda graph: graph[1].update(configuration=[{"filename": 12}]),
+            lambda graph: graph[1].update(configuration={"filename": "output.mp4"}),
+            lambda graph: graph[1].update(configuration=[{"filename": "output.mp4"}, {"filename": "other.txt"}]),
             lambda graph: graph[1].pop("connections"),
             lambda graph: graph[1].update(connections=[12]),
+            lambda graph: graph[1].update(connections=["input"]),
             lambda graph: graph[1].update(name=""),
         ]
         for mutate in mutations:
@@ -102,7 +107,7 @@ class JsonGraphTests(unittest.TestCase):
         self.assert_rejected(self.root / "missing.json")
 
     def test_missing_input_file(self):
-        self.config["graph"][0]["configuration"] = [{"filename": "missing.txt"}]
+        self.config["graph"][0]["configuration"] = [{"filename": "missing.mp4"}]
         self.assert_rejected(self.write_config(self.config))
 
 

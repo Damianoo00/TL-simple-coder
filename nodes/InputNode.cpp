@@ -1,26 +1,41 @@
 #include "InputNode.hpp"
 
-#include <cstdio>
-#include <filesystem>
-#include <sstream>
-#include <stdexcept>
-
 void InputNode::configure(std::unordered_map<std::string, std::string> config) {
     const std::string& filename = config.at("filename");
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("Cannot open input file: " + filename);
+
+    AVFormatContext* media = nullptr;
+    checkMedia(avformat_open_input(&media, filename.c_str(), nullptr, nullptr),
+               "Cannot open input MP4 " + filename);
+    try {
+        checkMedia(avformat_find_stream_info(media, nullptr), "Cannot read MP4 streams");
+        std::vector<MediaStream> streams;
+        for (unsigned i = 0; i < media->nb_streams; ++i) {
+            auto codec = avcodec_parameters_alloc();
+            if (!codec) throw std::bad_alloc();
+            std::shared_ptr<AVCodecParameters> owned(codec,
+                [](AVCodecParameters* p) { avcodec_parameters_free(&p); });
+            checkMedia(avcodec_parameters_copy(codec, media->streams[i]->codecpar),
+                       "Cannot copy stream parameters");
+            streams.push_back({std::move(owned), media->streams[i]->time_base});
+        }
+        m_filename = filename;
+        avformat_close_input(&m_media);
+        m_media = media;
+        m_streams = std::move(streams);
+        m_next_config = 0;
+        m_next_end = 0;
+        m_eof = false;
+        return;
+    } catch (...) {
+        avformat_close_input(&media);
+        throw;
     }
-    m_file = std::move(file);
-    m_filename = filename;
-    m_line_number = 0;
-    std::printf("InputNode: reading %s\n",
-                std::filesystem::absolute(filename).string().c_str());
 }
 
 InputNode::~InputNode() {
     // Join before destroying the file accessed by the worker thread.
     stop();
+    avformat_close_input(&m_media);
 }
 
 int InputNode::process() {
@@ -28,26 +43,27 @@ int InputNode::process() {
         return -1;
     }
 
-    std::string line;
-    if (!std::getline(m_file, line)) {
-        if (m_file.bad()) {
-            std::fprintf(stderr, "InputNode: read error in %s\n", m_filename.c_str());
+    if (!m_media) throw std::runtime_error("InputNode is not configured");
+    auto send = [this](MediaPacket message) {
+        auto queue = output<MediaPacket>();
+        return (!queue || queue->push(std::move(message))) ? 0 : -1;
+    };
+    if (m_next_config < m_streams.size()) {
+        const auto id = m_next_config++;
+        return send(MediaPacket::configFrame(static_cast<int>(id), m_streams.at(id)));
+    }
+    if (!m_eof) {
+        auto packet = makeAVPacket();
+        const int result = av_read_frame(m_media, packet.get());
+        if (result != AVERROR_EOF) {
+            checkMedia(result, "Cannot read media " + m_filename);
+            const int id = packet->stream_index;
+            return send(MediaPacket::dataFrame(id, std::move(packet)));
         }
-        return -1;
+        m_eof = true;
     }
-    ++m_line_number;
-
-    std::istringstream parser(line);
-    int value;
-    if (!(parser >> value) || !(parser >> std::ws).eof()) {
-        std::fprintf(stderr, "InputNode: invalid integer in %s at line %zu\n",
-                     m_filename.c_str(), m_line_number);
-        return -1;
+    if (m_next_end < m_streams.size()) {
+        return send(MediaPacket::endFrame(static_cast<int>(m_next_end++)));
     }
-
-    if (m_output.at(0)) {
-        return m_output.at(0)->push(value) ? 0 : -1;
-    }
-    std::printf("End of graph: %d\n", value);
-    return 0;
+    return -1;
 }

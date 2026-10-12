@@ -40,7 +40,7 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
         NodeDefinition definition;
         definition.name = requiredString(entry, "name");
         definition.type = requiredString(entry, "type");
-        if (definition.type != "Node" && definition.type != "InputNode" &&
+        if (definition.type != "InputNode" &&
             definition.type != "OutputNode") {
             throw std::runtime_error("Unknown node type: " + definition.type);
         }
@@ -91,6 +91,10 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
             if (!names.contains(target)) {
                 throw std::runtime_error("Unknown connection target " + target + " for node " + definition.name);
             }
+            if (definition.type == "OutputNode")
+                throw std::runtime_error("OutputNode has no output port: " + definition.name);
+            if (definitions.at(names.at(target)).type == "InputNode")
+                throw std::runtime_error("InputNode has no input port: " + target);
         }
     }
     return definitions;
@@ -109,15 +113,13 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
         }
         const auto definitions = readDefinitions(nlohmann::json::parse(file));
         auto graph = std::make_unique<Graph>();
-        std::unordered_map<std::string, Node*> nodes;
+        std::unordered_map<std::string, NodeBase*> nodes;
         for (const auto& definition : definitions) {
-            Node* node;
+            NodeBase* node;
             if (definition.type == "InputNode") {
                 node = &graph->addNode<InputNode>();
-            } else if (definition.type == "OutputNode") {
-                node = &graph->addNode<OutputNode>();
             } else {
-                node = &graph->addNode();
+                node = &graph->addNode<OutputNode>();
             }
             try {
                 node->configure(definition.configuration);
