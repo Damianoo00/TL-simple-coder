@@ -1,37 +1,42 @@
 # Budowanie i uruchamianie
 
-Projekt wymaga systemu POSIX (np. Linux), GNU Make, GCC z obsługą C++20,
-Conana 2 oraz `pkg-config`. Zależności `nlohmann_json/3.12.0` i `crowcpp-crow/1.3.2` są zadeklarowane
-w `conanfile.txt`; generator `PkgConfigDeps` przekazuje ścieżki nagłówków do Makefile.
+Projekt wymaga systemu POSIX (np. Linux), CMake 3.20 lub nowszego,
+kompilatora z obsługą C++20, Conana 2 oraz Pythona 3 do testów.
+Zależności `nlohmann_json/3.12.0` i `crowcpp-crow/1.3.2` są zadeklarowane
+w `conanfile.txt`. Generatory `CMakeDeps` i `CMakeToolchain` przygotowują
+pakiety i konfigurację dla CMake.
 
 ```sh
 conan profile detect # Tylko przy pierwszym użyciu Conana, jeżeli nie ma profilu default.
-make -j2
-make test
-make run
+conan install . --output-folder=build/conan --build=missing -s build_type=Release
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=conan/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j2
+ctest --test-dir build --output-on-failure
+cmake --build build --target run
 ```
 
-Makefile tworzy dwa oddzielne programy:
+CMake tworzy dwa oddzielne programy w katalogu `build`:
 
 - `graph_worker` — uruchamia graf i czeka na SIGTERM lub SIGINT;
 - `supervisor` — udostępnia API HTTP w Crow, uruchamia osobny proces
   `graph_worker` dla każdego POST i odbiera zakończone procesy przez `waitpid`.
 
-`make` automatycznie instaluje zależności w `build/conan`. Można wykonać ten
-krok osobno przez `make deps`, a opcje Conana przekazać np.
-`make CONAN_FLAGS="-pr:h=default -s:h build_type=Debug"`.
-Po zmianie profilu lub ustawień usuń poprzednie artefakty przez `make clean`.
+Opcje profilu i ustawień przekazuj do `conan install`, np. `-pr:h=default`.
+Dla konfiguracji Debug ustaw `-s build_type=Debug` w Conanie oraz
+`-DCMAKE_BUILD_TYPE=Debug` w CMake; użyj osobnego katalogu budowania.
+Po zmianie profilu lub toolchaina użyj nowego katalogu budowania.
+Testy można wyłączyć opcją CMake `-DBUILD_TESTING=OFF`.
 
 Bezpośrednie uruchomienie z katalogu projektu:
 
 ```sh
-./supervisor ./graph_worker
+./build/supervisor ./build/graph_worker
 ```
 
 Można podać bezwzględną ścieżkę workera, aby uruchomić supervisor z innego katalogu:
 
 ```sh
-/home/damian/Documents/cpp_testy/async_nodes/supervisor /home/damian/Documents/cpp_testy/async_nodes/graph_worker
+/home/damian/Documents/cpp_testy/async_nodes/build/supervisor /home/damian/Documents/cpp_testy/async_nodes/build/graph_worker
 ```
 
 Bez argumentu supervisor używa `./graph_worker` względem bieżącego katalogu.
@@ -44,7 +49,7 @@ używa SIGKILL. Błąd `posix_spawn` daje odpowiedź HTTP 500.
 Domyślnie API nasłuchuje na `127.0.0.1:8080`. Port możesz podać jako drugi argument:
 
 ```sh
-./supervisor ./graph_worker 9090
+./build/supervisor ./build/graph_worker 9090
 ```
 
 Supervisor nie uruchamia grafów automatycznie. Wyślij istniejącą konfigurację:
@@ -87,14 +92,15 @@ wymaga uwierzytelnienia; konfiguracje mają dostęp do plików z uprawnieniami p
 Sam worker:
 
 ```sh
-./graph_worker
+./build/graph_worker
 # Zakończ przez Ctrl+C.
 
 # Alternatywny plik konfiguracji:
-./graph_worker /ścieżka/do/config.json
+./build/graph_worker /ścieżka/do/config.json
 ```
 
-`make clean` usuwa pliki budowania i utworzone programy.
+`cmake --build build --target clean` usuwa skompilowane pliki i programy,
+pozostawiając konfigurację CMake oraz zależności Conana.
 
 Graf jest tworzony przez `JsonGraphParser::parseFile()` na podstawie `config.json`.
 Metoda zwraca `std::unique_ptr<Graph>`; węzły są skonfigurowane i połączone,

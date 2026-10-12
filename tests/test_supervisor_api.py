@@ -11,6 +11,8 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKER = Path(os.environ.get('GRAPH_WORKER', ROOT / 'build' / 'graph_worker')).resolve()
+SUPERVISOR = Path(os.environ.get('SUPERVISOR', ROOT / 'build' / 'supervisor')).resolve()
 
 
 class SupervisorApiTests(unittest.TestCase):
@@ -23,11 +25,11 @@ class SupervisorApiTests(unittest.TestCase):
             probe.bind(('127.0.0.1', 0))
             self.port = probe.getsockname()[1]
         self.worker = self.root / 'graph_worker'
-        self.worker.symlink_to(ROOT / 'graph_worker')
+        self.worker.symlink_to(WORKER)
         self.log = open(self.root / 'supervisor.log', 'w+')
         self.addCleanup(self.log.close)
         self.process = subprocess.Popen(
-            [str(ROOT / 'supervisor'), str(self.worker), str(self.port)],
+            [str(SUPERVISOR), str(self.worker), str(self.port)],
             cwd=self.root, stdout=self.log, stderr=self.log)
         self.addCleanup(self.shutdown)
         deadline = time.monotonic() + 5

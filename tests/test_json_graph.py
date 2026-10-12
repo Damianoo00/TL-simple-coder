@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -7,7 +8,7 @@ import time
 import unittest
 
 
-WORKER = Path(__file__).resolve().parents[1] / "graph_worker"
+WORKER = Path(os.environ.get("GRAPH_WORKER", Path(__file__).resolve().parents[1] / "build" / "graph_worker")).resolve()
 
 
 class JsonGraphTests(unittest.TestCase):
