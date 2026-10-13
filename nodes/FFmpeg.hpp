@@ -6,16 +6,20 @@ extern "C" {
 #include <libavutil/error.h>
 }
 
+#include <charconv>
+#include <cstdio>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
-inline void checkMedia(int result, const std::string& operation) {
+inline int logMediaResult(int result, const std::string& operation) {
     if (result < 0) {
         char message[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(result, message, sizeof(message));
-        throw std::runtime_error(operation + ": " + message);
+        std::fprintf(stderr, "%s: ffmpeg_code=%d: %s\n", operation.c_str(), result, message);
     }
+    return result;
 }
 
 struct MediaStream {
@@ -48,3 +52,28 @@ struct MediaPacket {
         return {Type::ENDFRAME, id, nullptr, nullptr};
     }
 };
+
+inline std::size_t mediaPortCount(const std::unordered_map<std::string, std::string>& config,
+                                  std::size_t fallback = 2) {
+    const auto entry = config.find("ports");
+    if (entry == config.end()) return fallback;
+    std::size_t count = 0;
+    const auto& value = entry->second;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), count);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || count == 0)
+        throw std::invalid_argument("ports must be a positive integer");
+    return count;
+}
+
+// Leaves count unchanged on invalid input.
+inline bool parseMediaPortCount(const std::unordered_map<std::string, std::string>& config,
+                                std::size_t& count) {
+    const auto entry = config.find("ports");
+    if (entry == config.end()) return count > 0;
+    std::size_t parsed = 0;
+    const auto& value = entry->second;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || !parsed) return false;
+    count = parsed;
+    return true;
+}

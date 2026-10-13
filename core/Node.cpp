@@ -6,7 +6,17 @@ NodeBase::~NodeBase() {
     stop();
 }
 
-void NodeBase::configure(std::unordered_map<std::string, std::string>) {}
+int NodeBase::configure(std::unordered_map<std::string, std::string>) {
+    m_status = Success;
+    return Success;
+}
+
+int NodeBase::fail(Result code, const char* detail, std::size_t port, int stream_id) {
+    m_status = code;
+    std::fprintf(stderr, "%s: code=%d port=%zu stream_id=%d: %s\n",
+                 nodeType(), code, port, stream_id, detail);
+    return code;
+}
 
 void NodeBase::connect(NodeBase& next, std::size_t output_port,
                        std::size_t input_port) {

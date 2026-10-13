@@ -100,6 +100,34 @@ class JsonGraphTests(unittest.TestCase):
             with self.subTest(configuration=configuration):
                 self.assert_rejected(self.write_config(configuration))
 
+    def test_invalid_port_mappings_do_not_truncate_output(self):
+        config = {"graph": [
+            {"type": "InputNode", "name": "input", "configuration": [{"filename": "input.mp4"}], "connections": ["demux"]},
+            {"type": "DemuxNode", "name": "demux", "configuration": [{"ports": "2"}],
+             "connections": [{"node": "mux", "output_port": 0, "input_port": 0},
+                             {"node": "mux", "output_port": 1, "input_port": 1}]},
+            {"type": "MuxerNode", "name": "mux", "configuration": [{"ports": "2"}], "connections": ["output"]},
+            {"type": "OutputNode", "name": "output", "configuration": [{"filename": "output.mp4"}], "connections": []},
+        ]}
+        mutations = [
+            lambda graph: graph[1]["connections"][0].update(output_port=-1),
+            lambda graph: graph[1]["connections"][0].update(output_port=2),
+            lambda graph: graph[1]["connections"][0].update(input_port=2),
+            lambda graph: graph[1]["connections"][0].update(input_port="0"),
+            lambda graph: graph[1]["connections"][0].update(input_port=0.5),
+            lambda graph: graph[1]["connections"][0].pop("node"),
+            lambda graph: graph[1]["connections"][1].update(output_port=0),
+            lambda graph: graph[1]["connections"][1].update(input_port=0),
+            lambda graph: graph[1].update(connections=graph[1]["connections"][:1]),
+            lambda graph: graph[1].update(configuration=[{"ports": "0"}]),
+            lambda graph: graph[2].update(configuration=[{"ports": "invalid"}]),
+        ]
+        for mutate in mutations:
+            configuration = copy.deepcopy(config)
+            mutate(configuration["graph"])
+            with self.subTest(configuration=configuration):
+                self.assert_rejected(self.write_config(configuration))
+
     def test_invalid_json_and_missing_file(self):
         path = self.root / "broken.json"
         path.write_text('{"graph": [],}')

@@ -10,6 +10,8 @@ add_library(graph_core STATIC
     core/Node.cpp
     nodes/InputNode.cpp
     nodes/OutputNode.cpp
+    nodes/DemuxNode.cpp
+    nodes/MuxerNode.cpp
     api/JsonGraphParser.cpp
 )
 target_compile_features(graph_core PUBLIC cxx_std_20)
@@ -39,6 +41,10 @@ add_custom_target(run
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(test_demux_mux tests/test_demux_mux.cpp)
+    target_link_libraries(test_demux_mux PRIVATE graph_core)
+    add_test(NAME demux_mux COMMAND test_demux_mux)
+    set_tests_properties(demux_mux PROPERTIES TIMEOUT 10)
     add_executable(test_media_protocol tests/test_media_protocol.cpp)
     target_link_libraries(test_media_protocol PRIVATE graph_core)
     add_executable(test_typed_nodes tests/test_typed_nodes.cpp)

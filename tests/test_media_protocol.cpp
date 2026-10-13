@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
     require(argc == 3, "Expected input and output MP4 paths");
     InputNode input;
     Collector collector;
-    input.configure({{"filename", argv[1]}});
+    require(input.configure({{"filename", argv[1]}}) == NodeBase::Success, "Input configuration failed");
     input.connect(collector);
 
     std::vector<MediaPacket> messages;
@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
     // IDs need not be contiguous or equal to the AVPacket stream_index.
     Sender sender;
     OutputNode output;
-    output.configure({{"filename", argv[2]}});
+    require(output.configure({{"filename", argv[2]}}) == NodeBase::Success, "Output configuration failed");
     sender.connect(output);
     for (std::size_t i = 0; i < count; ++i) {
         auto message = messages[i];
@@ -77,38 +77,39 @@ int main(int argc, char** argv) {
     }
 
     unsigned rejected = 0;
-    auto expectRejected = [&](std::vector<MediaPacket> sequence, const std::string& error) {
+    auto expectRejected = [&](std::vector<MediaPacket> sequence, int error) {
         Sender source;
         OutputNode sink;
-        sink.configure({{"filename", std::string(argv[2]) + ".invalid-" + std::to_string(rejected++)}});
+        require(sink.configure({{"filename", std::string(argv[2]) + ".invalid-" + std::to_string(rejected++)}})
+                == NodeBase::Success, "Invalid sequence sink configuration failed");
         source.connect(sink);
-        try {
-            for (auto& message : sequence) {
-                source.send(std::move(message));
-                sink.process();
+        for (auto& message : sequence) {
+            source.send(std::move(message));
+            const int result = sink.process();
+            if (result < NodeBase::Finished) {
+                require(result == error, "Unexpected protocol error code");
+                require(sink.status() == error && sink.process() == error, "Error must remain terminal");
+                return;
             }
-        } catch (const std::runtime_error& failure) {
-            require(std::string(failure.what()).find(error) != std::string::npos,
-                    "Unexpected protocol error");
-            return;
         }
         throw std::logic_error("Invalid message sequence was accepted");
     };
-    expectRejected({messages[2]}, "DATAFRAME before CONFIGFRAME");
-    expectRejected({messages[0], messages[0]}, "Duplicate CONFIGFRAME");
-    expectRejected({messages[count - 1]}, "ENDFRAME before CONFIGFRAME");
+    expectRejected({messages[2]}, NodeBase::FrameBeforeConfig);
+    expectRejected({messages[0], messages[0]}, NodeBase::DuplicateStreamId);
+    expectRejected({messages[count - 1]}, NodeBase::FrameBeforeConfig);
     expectRejected({messages[0], messages[1], messages[count - 2], messages[count - 2]},
-                   "Duplicate ENDFRAME");
+                   NodeBase::FrameAfterEnd);
     expectRejected({messages[0], messages[1], messages[2], messages[0]},
-                   "CONFIGFRAME received after MP4 header");
+                   NodeBase::LateConfigFrame);
     auto data = messages[2];
     const auto eof = MediaPacket::endFrame(data.stream_id);
-    expectRejected({messages[0], messages[1], eof, data}, "DATAFRAME after ENDFRAME");
+    expectRejected({messages[0], messages[1], eof, data}, NodeBase::FrameAfterEnd);
 
     // Configured streams with no packets still have explicit EOF messages.
     Sender empty_source;
     OutputNode empty_output;
-    empty_output.configure({{"filename", std::string(argv[2]) + ".empty"}});
+    require(empty_output.configure({{"filename", std::string(argv[2]) + ".empty"}})
+            == NodeBase::Success, "Empty output configuration failed");
     empty_source.connect(empty_output);
     for (auto index : {std::size_t(0), std::size_t(1), count - 2, count - 1}) {
         empty_source.send(messages[index]);

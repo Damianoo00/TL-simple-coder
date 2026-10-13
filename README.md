@@ -115,13 +115,14 @@ czyta cały plik niezależnie. Zmiana danych lub konfiguracji nie wymaga
 ponownej kompilacji.
 
 Konfiguracja zawiera niepustą tablicę `graph`. Każdy węzeł ma unikalną,
-niepustą nazwę `name`, `type` (`InputNode` albo `OutputNode`),
+niepustą nazwę `name`, `type` (`InputNode`, `OutputNode`, `DemuxNode` albo `MuxerNode`),
 tablicę `configuration` obiektów z parametrami tekstowymi oraz tablicę
-`connections` z nazwą następnego węzła lub pustą dla końca grafu.
+`connections` z nazwami następnych węzłów lub obiektami mapowania portów;
+pusta tablica oznacza brak połączeń wychodzących.
 `InputNode` i `OutputNode` wymagają niepustego parametru `filename`.
 Powtarzające się klucze między obiektami `configuration` są odrzucane.
-Obecne węzły mają jeden port wyjściowy, dlatego dozwolone jest najwyżej jedno
-połączenie wychodzące. Połączenia mogą wskazywać węzły opisane dalej w pliku.
+`InputNode` i `MuxerNode` mają jedno wyjście, `OutputNode` nie ma wyjść,
+a `DemuxNode` ma konfigurowalną liczbę wyjść. Połączenia mogą wskazywać węzły opisane dalej w pliku.
 Parser sprawdza strukturę i wszystkie odwołania przed konfiguracją węzłów;
 błąd konfiguracji jest wypisywany na stderr, a worker kończy się kodem 1.
 Ścieżka konfiguracji oraz względne ścieżki `filename` są rozwiązywane względem
@@ -186,7 +187,21 @@ po `QueueBase`, co pozwala sprawdzać typy połączeń dynamicznych.
 Konfiguracja, dane i EOF przechodzą przez tę samą kolejkę.
 Parametry FFmpeg i zarządzanie jego pamięcią są w `nodes/FFmpeg.hpp`;
 `core/Node.hpp` nie zależy od FFmpeg. `int` zwracany z `process()` jest kodem stanu:
-0 oznacza kontynuację, a -1 zakończenie wątku. Wyjście
+`NodeBase::Success` (0) oznacza kontynuację, `Finished` (-1) zakończenie,
+a wartości poniżej -1 oznaczają błędy (nazwane kody w `NodeBase::Result`).
+`configure()` również zwraca kod: przed uruchomieniem grafu należy sprawdzić,
+czy zwróciło `Success`. Konstruktor muxera/demuxera z zerową liczbą portów
+zapisuje `InvalidPorts`, dostępny przez `status()`. Błąd konfiguracji lub
+przetwarzania pozostaje zapisany; kolejne `process()` zwraca ten sam kod.
+Poprawna konfiguracja resetuje błąd. Konfigurację wykonuj przed startem,
+a `status()` odczytuj przed startem lub po `stop()`.
+Log na stderr podaje typ noda, kod, port i ID strumienia; błędy FFmpeg
+zawierają także oryginalny kod, opis i ścieżkę pliku przy operacjach plikowych.
+Parser JSON sprawdza wynik konfiguracji i zgłasza błąd z nazwą noda.
+Wyjątki parsera, walidacji połączeń i alokacji standardowych kontenerów
+pozostają poza tą zmianą. Kolejki nadal blokują i alokują pamięć, a logowanie
+jest synchroniczne; ta zmiana nie zapewnia deterministycznego czasu wykonania.
+Wyjście
 przepisuje wszystkie strumienie do kontenera MP4, zachowując kodeki, audio
 oraz znaczniki czasu. To remuksowanie, bez dekodowania klatek, modyfikacji
 obrazu i ponownego kodowania. Kodeki muszą być obsługiwane przez kontener MP4.
@@ -234,8 +249,59 @@ graph.connect(input, output);
 ```
 
 `connect()` i `Graph::connect()` sprawdzają zgodność typów kolejek w czasie
-działania. Parser JSON obsługuje tylko konkretne typy `InputNode` i `OutputNode`;
-typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
+działania. Parser JSON obsługuje konkretne typy `InputNode`, `OutputNode`, `DemuxNode`
+i `MuxerNode`; typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
 i z wyjścia `OutputNode` przed otwarciem plików.
 W destruktorze własnego węzła wywołaj `stop()` przed zniszczeniem jego zasobów,
 jak robią `InputNode` i `OutputNode`.
+
+## Rozdzielanie i łączenie strumieni
+
+`DemuxNode` ma jedno wejście i domyślnie dwa wyjścia. Kolejne konfiguracje
+przypisuje do kolejnych portów: pierwsze ID do portu 0, drugie do portu 1 itd.
+ID nie musi odpowiadać numerowi portu ani być kolejną liczbą. Wiadomości
+`CONFIGFRAME`, `DATAFRAME` i `ENDFRAME` danego ID trafiają zawsze do tego samego
+wyjścia. Po EOF strumienia jego kolejka jest zamykana. Niewykorzystane porty
+są zamykane po zakończeniu konfiguracji, aby odbiorcy nie czekali bez końca.
+Zbyt mała liczba wyjść lub brak połączenia dla aktywnego strumienia daje błąd.
+
+`MuxerNode` ma domyślnie dwa wejścia i jedno wyjście. Każde wejście przenosi
+jeden strumień. Najpierw odbiera i wysyła wszystkie konfiguracje w kolejności
+portów, potem przeplata dane według DTS (zastępczo PTS) z uwzględnieniem
+`time_base`. Pakiety bez obu znaczników są wybierane w kolejności portów.
+ID oraz zawartość pakietów są zachowywane. EOF wszystkich skonfigurowanych
+strumieni wysyła po ostatnich danych. Nie odtwarza dokładnej kolejności
+nadejścia pakietów z wejściowego pliku — tworzy kolejność według czasu.
+
+Muxer czeka na pierwszy pakiet lub EOF każdego aktywnego wejścia, żeby
+porównać czasy. Wszystkie wejścia należy połączyć; port bez strumienia musi
+mieć zamkniętą kolejkę (DemuxNode robi to automatycznie). Zatrzymanie grafu
+zamyka kolejki i pozwala zakończyć oczekiwanie. Zamknięcie bez `ENDFRAME`
+finalizuje częściowy potok bez generowania sztucznego EOF.
+
+Liczbę portów określa tekstowy parametr `ports`, np. `{"ports": "3"}`,
+albo argument konstruktora w C++:
+
+```cpp
+auto& demux = graph.addNode<DemuxNode>(2);
+auto& mux = graph.addNode<MuxerNode>(2);
+graph.connect(input, demux);
+graph.connect(demux, mux, 0, 0);
+graph.connect(demux, mux, 1, 1);
+graph.connect(mux, output);
+```
+
+W JSON połączenie może być nazwą węzła (numer wyjścia odpowiada pozycji
+w tablicy, wejście ma numer 0) albo obiektem z jawnymi portami:
+
+```json
+"connections": [
+  {"node": "mux", "output_port": 0, "input_port": 0},
+  {"node": "mux", "output_port": 1, "input_port": 1}
+]
+```
+
+Parser sprawdza zakresy portów, powtórzone połączenia i kompletność wejść
+MuxerNode przed otwarciem plików. Przykład całego potoku
+`InputNode -> DemuxNode -> MuxerNode -> OutputNode` znajduje się
+w `examples/demux_mux.json`.

@@ -1,0 +1,59 @@
+{
+  "graph": [
+    {
+      "type": "InputNode",
+      "name": "input",
+      "configuration": [
+        {
+          "filename": "input.mp4"
+        }
+      ],
+      "connections": [
+        "demux"
+      ]
+    },
+    {
+      "type": "DemuxNode",
+      "name": "demux",
+      "configuration": [
+        {
+          "ports": "2"
+        }
+      ],
+      "connections": [
+        {
+          "node": "mux",
+          "output_port": 0,
+          "input_port": 0
+        },
+        {
+          "node": "mux",
+          "output_port": 1,
+          "input_port": 1
+        }
+      ]
+    },
+    {
+      "type": "MuxerNode",
+      "name": "mux",
+      "configuration": [
+        {
+          "ports": "2"
+        }
+      ],
+      "connections": [
+        "output"
+      ]
+    },
+    {
+      "type": "OutputNode",
+      "name": "output",
+      "configuration": [
+        {
+          "filename": "output.mp4"
+        }
+      ],
+      "connections": []
+    }
+  ]
+}

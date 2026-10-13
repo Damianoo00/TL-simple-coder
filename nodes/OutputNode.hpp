@@ -11,11 +11,12 @@ public:
     OutputNode() { addInput<MediaPacket>(); }
     ~OutputNode() override;
 
-    void configure(std::unordered_map<std::string, std::string> config) override;
+    int configure(std::unordered_map<std::string, std::string> config) override;
     int process() override;
 
 private:
-    void finishMedia();
+    const char* nodeType() const override { return "OutputNode"; }
+    int finishMedia();
     AVFormatContext* m_media = nullptr;
     struct StreamState {
         AVRational time_base;
@@ -24,7 +25,7 @@ private:
     };
     std::unordered_map<int, StreamState> m_streams;
     std::size_t m_ended_streams = 0;
-    void writeHeader();
+    int writeHeader();
     bool m_header_written = false;
     std::string m_filename;
 };

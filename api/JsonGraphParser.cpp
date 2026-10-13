@@ -1,6 +1,8 @@
 #include "JsonGraphParser.hpp"
 
 #include "nodes/InputNode.hpp"
+#include "nodes/DemuxNode.hpp"
+#include "nodes/MuxerNode.hpp"
 #include "nodes/OutputNode.hpp"
 
 #include <nlohmann/json.hpp>
@@ -13,11 +15,17 @@
 #include <vector>
 
 namespace {
+struct Connection {
+    std::string target;
+    std::size_t output_port;
+    std::size_t input_port;
+};
+
 struct NodeDefinition {
     std::string type;
     std::string name;
     std::unordered_map<std::string, std::string> configuration;
-    std::vector<std::string> connections;
+    std::vector<Connection> connections;
 };
 
 std::string requiredString(const nlohmann::json& object, const char* key) {
@@ -40,8 +48,8 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
         NodeDefinition definition;
         definition.name = requiredString(entry, "name");
         definition.type = requiredString(entry, "type");
-        if (definition.type != "InputNode" &&
-            definition.type != "OutputNode") {
+        if (definition.type != "InputNode" && definition.type != "OutputNode" &&
+            definition.type != "DemuxNode" && definition.type != "MuxerNode") {
             throw std::runtime_error("Unknown node type: " + definition.type);
         }
         if (!names.emplace(definition.name, definitions.size()).second) {
@@ -73,29 +81,67 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
         }
 
         const auto& connections = entry.at("connections");
-        if (!connections.is_array() || connections.size() > 1) {
-            throw std::runtime_error("connections must be an array with at most one target for node " + definition.name);
-        }
+        if (!connections.is_array())
+            throw std::runtime_error("connections must be an array for node " + definition.name);
         for (const auto& target : connections) {
-            if (!target.is_string() || target.get_ref<const std::string&>().empty()) {
-                throw std::runtime_error("Connection targets must be non-empty strings for node " + definition.name);
-            }
-            definition.connections.push_back(target.get<std::string>());
+            Connection connection;
+            connection.output_port = definition.connections.size();
+            connection.input_port = 0;
+            if (target.is_string()) {
+                connection.target = target.get<std::string>();
+                if (connection.target.empty()) throw std::runtime_error("Empty connection target");
+            } else if (target.is_object()) {
+                connection.target = requiredString(target, "node");
+                auto port = [&target](const char* key, std::size_t fallback) {
+                    if (!target.contains(key)) return fallback;
+                    const auto& value = target.at(key);
+                    if (!value.is_number_integer() ||
+                        (!value.is_number_unsigned() && value.get<std::int64_t>() < 0))
+                        throw std::runtime_error(std::string(key) + " must be a non-negative integer");
+                    return value.get<std::size_t>();
+                };
+                connection.output_port = port("output_port", connection.output_port);
+                connection.input_port = port("input_port", 0);
+            } else throw std::runtime_error("Connection must be a node name or a port mapping");
+            definition.connections.push_back(std::move(connection));
         }
         definitions.push_back(std::move(definition));
     }
 
-    // Validate all references before configure() can open or truncate files.
+    // Validate references, port counts and collisions before opening any files.
+    auto inputCount = [](const NodeDefinition& node) -> std::size_t {
+        if (node.type == "InputNode") return 0;
+        if (node.type == "MuxerNode") return mediaPortCount(node.configuration);
+        return 1;
+    };
+    auto outputCount = [](const NodeDefinition& node) -> std::size_t {
+        if (node.type == "OutputNode") return 0;
+        if (node.type == "DemuxNode") return mediaPortCount(node.configuration);
+        return 1;
+    };
+    std::vector<std::unordered_map<std::size_t, bool>> incoming(definitions.size());
     for (const auto& definition : definitions) {
-        for (const auto& target : definition.connections) {
-            if (!names.contains(target)) {
-                throw std::runtime_error("Unknown connection target " + target + " for node " + definition.name);
-            }
-            if (definition.type == "OutputNode")
-                throw std::runtime_error("OutputNode has no output port: " + definition.name);
-            if (definitions.at(names.at(target)).type == "InputNode")
-                throw std::runtime_error("InputNode has no input port: " + target);
+        // Validate ports configuration even for an unconnected node.
+        const auto outputs = outputCount(definition);
+        inputCount(definition);
+        std::unordered_map<std::size_t, bool> used_outputs;
+        for (const auto& connection : definition.connections) {
+            const auto target = names.find(connection.target);
+            if (target == names.end())
+                throw std::runtime_error("Unknown connection target " + connection.target);
+            if (connection.output_port >= outputs)
+                throw std::runtime_error("Invalid output port for node " + definition.name);
+            if (connection.input_port >= inputCount(definitions[target->second]))
+                throw std::runtime_error("Invalid input port for node " + connection.target);
+            if (!used_outputs.emplace(connection.output_port, true).second)
+                throw std::runtime_error("Output port is connected more than once");
+            if (!incoming[target->second].emplace(connection.input_port, true).second)
+                throw std::runtime_error("Input port is connected more than once");
         }
+    }
+    for (std::size_t i = 0; i < definitions.size(); ++i) {
+        if (definitions[i].type == "MuxerNode" && incoming[i].size() != inputCount(definitions[i]))
+            throw std::runtime_error("All MuxerNode input ports must be connected");
     }
     return definitions;
 }
@@ -118,19 +164,26 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
             NodeBase* node;
             if (definition.type == "InputNode") {
                 node = &graph->addNode<InputNode>();
-            } else {
+            } else if (definition.type == "OutputNode") {
                 node = &graph->addNode<OutputNode>();
+            } else if (definition.type == "DemuxNode") {
+                node = &graph->addNode<DemuxNode>();
+            } else {
+                node = &graph->addNode<MuxerNode>();
             }
             try {
-                node->configure(definition.configuration);
+                const int result = node->configure(definition.configuration);
+                if (result != NodeBase::Success)
+                    throw std::runtime_error("configuration failed, code=" + std::to_string(result));
             } catch (const std::exception& error) {
                 throw std::runtime_error("Node " + definition.name + ": " + error.what());
             }
             nodes.emplace(definition.name, node);
         }
         for (const auto& definition : definitions) {
-            for (const auto& target : definition.connections) {
-                graph->connect(*nodes.at(definition.name), *nodes.at(target));
+            for (const auto& connection : definition.connections) {
+                graph->connect(*nodes.at(definition.name), *nodes.at(connection.target),
+                               connection.output_port, connection.input_port);
             }
         }
         return graph;

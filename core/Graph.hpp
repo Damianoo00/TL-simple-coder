@@ -22,8 +22,9 @@ class Graph{
             return ref;
         }
 
-        void connect(NodeBase& from, NodeBase& to) {
-            from.connect(to);
+        void connect(NodeBase& from, NodeBase& to, std::size_t output_port = 0,
+                     std::size_t input_port = 0) {
+            from.connect(to, output_port, input_port);
         }
 
         void start() {

@@ -1,69 +1,71 @@
 #include "InputNode.hpp"
 
-void InputNode::configure(std::unordered_map<std::string, std::string> config) {
-    const std::string& filename = config.at("filename");
-
-    AVFormatContext* media = nullptr;
-    checkMedia(avformat_open_input(&media, filename.c_str(), nullptr, nullptr),
-               "Cannot open input MP4 " + filename);
-    try {
-        checkMedia(avformat_find_stream_info(media, nullptr), "Cannot read MP4 streams");
-        std::vector<MediaStream> streams;
-        for (unsigned i = 0; i < media->nb_streams; ++i) {
-            auto codec = avcodec_parameters_alloc();
-            if (!codec) throw std::bad_alloc();
-            std::shared_ptr<AVCodecParameters> owned(codec,
-                [](AVCodecParameters* p) { avcodec_parameters_free(&p); });
-            checkMedia(avcodec_parameters_copy(codec, media->streams[i]->codecpar),
-                       "Cannot copy stream parameters");
-            streams.push_back({std::move(owned), media->streams[i]->time_base});
-        }
-        m_filename = filename;
-        avformat_close_input(&m_media);
-        m_media = media;
-        m_streams = std::move(streams);
-        m_next_config = 0;
-        m_next_end = 0;
-        m_eof = false;
-        return;
-    } catch (...) {
-        avformat_close_input(&media);
-        throw;
+int InputNode::configure(std::unordered_map<std::string, std::string> config) {
+    const auto entry = config.find("filename");
+    if (entry == config.end() || entry->second.empty())
+        return fail(InvalidConfiguration, "missing non-empty filename");
+    const auto& filename = entry->second;
+    AVFormatContext* raw = nullptr;
+    if (logMediaResult(avformat_open_input(&raw, filename.c_str(), nullptr, nullptr),
+                       "InputNode: cannot open " + filename) < 0)
+        return fail(MediaError, "cannot open input file");
+    auto close = [](AVFormatContext* context) { avformat_close_input(&context); };
+    std::unique_ptr<AVFormatContext, decltype(close)> media(raw, close);
+    if (logMediaResult(avformat_find_stream_info(raw, nullptr), "InputNode: cannot read streams " + filename) < 0)
+        return fail(MediaError, "cannot read stream information");
+    std::vector<MediaStream> streams;
+    for (unsigned i = 0; i < raw->nb_streams; ++i) {
+        auto codec = avcodec_parameters_alloc();
+        if (!codec) return fail(AllocationFailed, "cannot allocate codec parameters", 0, static_cast<int>(i));
+        std::shared_ptr<AVCodecParameters> owned(codec,
+            [](AVCodecParameters* p) { avcodec_parameters_free(&p); });
+        if (logMediaResult(avcodec_parameters_copy(codec, raw->streams[i]->codecpar),
+                           "InputNode: cannot copy stream parameters") < 0)
+            return fail(MediaError, "cannot copy stream parameters", 0, static_cast<int>(i));
+        streams.push_back({std::move(owned), raw->streams[i]->time_base});
     }
+    m_filename = filename;
+    avformat_close_input(&m_media);
+    m_media = media.release();
+    m_streams = std::move(streams);
+    m_next_config = m_next_end = 0;
+    m_eof = false;
+    m_status = Success;
+    return Success;
 }
 
 InputNode::~InputNode() {
-    // Join before destroying the file accessed by the worker thread.
     stop();
     avformat_close_input(&m_media);
 }
 
 int InputNode::process() {
-    if (m_stop_requested.load()) {
-        return -1;
-    }
-
-    if (!m_media) throw std::runtime_error("InputNode is not configured");
-    auto send = [this](MediaPacket message) {
-        auto queue = output<MediaPacket>();
-        return (!queue || queue->push(std::move(message))) ? 0 : -1;
+    if (m_status != Success) return m_status;
+    if (m_stop_requested.load()) return Finished;
+    if (!m_media) return fail(NotConfigured, "input is not configured");
+    auto queue = output<MediaPacket>();
+    if (!queue) return fail(OutputNotConnected, "output is not connected");
+    auto send = [&queue](MediaPacket message) {
+        return queue->push(std::move(message)) ? Success : Finished;
     };
     if (m_next_config < m_streams.size()) {
         const auto id = m_next_config++;
-        return send(MediaPacket::configFrame(static_cast<int>(id), m_streams.at(id)));
+        return send(MediaPacket::configFrame(static_cast<int>(id), m_streams[id]));
     }
     if (!m_eof) {
-        auto packet = makeAVPacket();
+        auto raw = av_packet_alloc();
+        if (!raw) return fail(AllocationFailed, "cannot allocate input packet");
+        AVPacketPtr packet(raw, [](AVPacket* p) { av_packet_free(&p); });
         const int result = av_read_frame(m_media, packet.get());
         if (result != AVERROR_EOF) {
-            checkMedia(result, "Cannot read media " + m_filename);
+            if (logMediaResult(result, "InputNode: cannot read " + m_filename) < 0)
+                return fail(MediaError, "cannot read input packet");
             const int id = packet->stream_index;
             return send(MediaPacket::dataFrame(id, std::move(packet)));
         }
         m_eof = true;
     }
-    if (m_next_end < m_streams.size()) {
+    if (m_next_end < m_streams.size())
         return send(MediaPacket::endFrame(static_cast<int>(m_next_end++)));
-    }
-    return -1;
+    return Finished;
 }

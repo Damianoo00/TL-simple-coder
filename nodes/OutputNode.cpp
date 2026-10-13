@@ -1,22 +1,24 @@
 #include "OutputNode.hpp"
 
-#include <cstdio>
-#include <stdexcept>
 #include <utility>
 
-void OutputNode::configure(std::unordered_map<std::string, std::string> config) {
-    const std::string& filename = config.at("filename");
-    finishMedia();
-    checkMedia(avformat_alloc_output_context2(&m_media, nullptr, "mp4", filename.c_str()),
-               "Cannot create output MP4 " + filename);
-    try {
-        checkMedia(avio_open(&m_media->pb, filename.c_str(), AVIO_FLAG_WRITE),
-                   "Cannot open output MP4 " + filename);
-    } catch (...) {
+int OutputNode::configure(std::unordered_map<std::string, std::string> config) {
+    const auto entry = config.find("filename");
+    if (entry == config.end() || entry->second.empty())
+        return fail(InvalidConfiguration, "missing non-empty filename");
+    if (finishMedia() < Finished) return m_status;
+    const auto& filename = entry->second;
+    if (logMediaResult(avformat_alloc_output_context2(&m_media, nullptr, "mp4", filename.c_str()),
+                       "OutputNode: cannot create " + filename) < 0 || !m_media)
+        return fail(MediaError, "cannot create output context");
+    if (logMediaResult(avio_open(&m_media->pb, filename.c_str(), AVIO_FLAG_WRITE),
+                       "OutputNode: cannot open " + filename) < 0) {
         finishMedia();
-        throw;
+        return fail(MediaError, "cannot open output file");
     }
     m_filename = filename;
+    m_status = Success;
+    return Success;
 }
 
 OutputNode::~OutputNode() {
@@ -25,36 +27,42 @@ OutputNode::~OutputNode() {
     finishMedia();
 }
 
-void OutputNode::writeHeader() {
-    if (m_header_written) return;
-    if (m_streams.empty()) throw std::runtime_error("MP4 output has no configured streams");
-    checkMedia(avformat_write_header(m_media, nullptr), "Cannot write MP4 header");
+int OutputNode::writeHeader() {
+    if (m_header_written) return Success;
+    if (m_streams.empty()) return fail(InvalidConfigFrame, "MP4 output has no configured streams");
+    if (logMediaResult(avformat_write_header(m_media, nullptr), "OutputNode: Cannot write MP4 header " + m_filename) < 0)
+        return fail(MediaError, "Cannot write MP4 header");
     m_header_written = true;
+    return Success;
 }
 
 int OutputNode::process() {
+    if (m_status != Success) return m_status;
+    if (!m_media) return fail(NotConfigured, "output is not configured or already finished");
     auto message = input<MediaPacket>()->pop();
     if (!message) {
         // Queue closure also permits a partial file to be finalized on stop.
-        if (!m_streams.empty()) writeHeader();
-        finishMedia();
-        return -1;
+        if (!m_streams.empty() && writeHeader() != Success) {
+            finishMedia();
+            return m_status;
+        }
+        const int result = finishMedia();
+        return result == Success ? Finished : result;
     }
-    if (!m_media) throw std::runtime_error("OutputNode is not configured or is already finished");
     const int id = message->stream_id;
-    if (id < 0) throw std::runtime_error("Invalid media stream ID");
+    if (id < 0) return fail(InvalidStreamId, "Invalid media stream ID", 0, id);
 
     switch (message->type) {
     case MediaPacket::Type::CONFIGFRAME: {
-        if (m_header_written) throw std::runtime_error("CONFIGFRAME received after MP4 header");
-        if (m_streams.contains(id)) throw std::runtime_error("Duplicate CONFIGFRAME for stream");
+        if (m_header_written) return fail(LateConfigFrame, "CONFIGFRAME received after MP4 header", 0, id);
+        if (m_streams.contains(id)) return fail(DuplicateStreamId, "Duplicate CONFIGFRAME for stream", 0, id);
         const auto& config = message->config;
         if (!config || message->packet || !config->codec || config->time_base.num <= 0 || config->time_base.den <= 0)
-            throw std::runtime_error("Invalid CONFIGFRAME parameters");
+            return fail(InvalidConfigFrame, "Invalid CONFIGFRAME parameters", 0, id);
         auto stream = avformat_new_stream(m_media, nullptr);
-        if (!stream) throw std::bad_alloc();
-        checkMedia(avcodec_parameters_copy(stream->codecpar, config->codec.get()),
-                   "Cannot configure output stream");
+        if (!stream) return fail(AllocationFailed, "cannot allocate output stream", 0, id);
+        if (logMediaResult(avcodec_parameters_copy(stream->codecpar, config->codec.get()), "OutputNode: Cannot configure output stream " + m_filename) < 0)
+            return fail(MediaError, "Cannot configure output stream", 0, id);
         stream->codecpar->codec_tag = 0;
         stream->time_base = config->time_base;
         m_streams.emplace(id, StreamState{config->time_base, stream->index, false});
@@ -62,49 +70,55 @@ int OutputNode::process() {
     }
     case MediaPacket::Type::DATAFRAME: {
         auto found = m_streams.find(id);
-        if (found == m_streams.end()) throw std::runtime_error("DATAFRAME before CONFIGFRAME");
-        if (found->second.ended) throw std::runtime_error("DATAFRAME after ENDFRAME");
+        if (found == m_streams.end()) return fail(FrameBeforeConfig, "DATAFRAME before CONFIGFRAME", 0, id);
+        if (found->second.ended) return fail(FrameAfterEnd, "DATAFRAME after ENDFRAME", 0, id);
         const auto& packet = message->packet;
-        if (!packet || message->config) throw std::runtime_error("DATAFRAME requires an AVPacket");
-        writeHeader();
-        auto copy = makeAVPacket();
-        checkMedia(av_packet_ref(copy.get(), packet.get()), "Cannot reference MP4 packet");
+        if (!packet || message->config) return fail(InvalidDataFrame, "DATAFRAME requires an AVPacket", 0, id);
+        if (writeHeader() != Success) return m_status;
+        auto raw = av_packet_alloc();
+        if (!raw) return fail(AllocationFailed, "cannot allocate output packet", 0, id);
+        AVPacketPtr copy(raw, [](AVPacket* p) { av_packet_free(&p); });
+        if (logMediaResult(av_packet_ref(copy.get(), packet.get()), "OutputNode: Cannot reference MP4 packet " + m_filename) < 0)
+            return fail(MediaError, "Cannot reference MP4 packet", 0, id);
         copy->stream_index = found->second.output_index;
         av_packet_rescale_ts(copy.get(), found->second.time_base,
                             m_media->streams[copy->stream_index]->time_base);
         copy->pos = -1;
-        checkMedia(av_interleaved_write_frame(m_media, copy.get()), "Cannot write MP4 packet");
+        if (logMediaResult(av_interleaved_write_frame(m_media, copy.get()), "OutputNode: Cannot write MP4 packet " + m_filename) < 0)
+            return fail(MediaError, "Cannot write MP4 packet", 0, id);
         return 0;
     }
     case MediaPacket::Type::ENDFRAME: {
         auto found = m_streams.find(id);
-        if (found == m_streams.end()) throw std::runtime_error("ENDFRAME before CONFIGFRAME");
-        if (found->second.ended) throw std::runtime_error("Duplicate ENDFRAME for stream");
+        if (found == m_streams.end()) return fail(FrameBeforeConfig, "ENDFRAME before CONFIGFRAME", 0, id);
+        if (found->second.ended) return fail(FrameAfterEnd, "Duplicate ENDFRAME for stream", 0, id);
         if (message->config || message->packet)
-            throw std::runtime_error("ENDFRAME must not contain data");
-        writeHeader();
+            return fail(InvalidEndFrame, "ENDFRAME must not contain data", 0, id);
+        if (writeHeader() != Success) return m_status;
         found->second.ended = true;
         if (++m_ended_streams == m_streams.size()) {
-            finishMedia();
-            return -1;
+            const int result = finishMedia();
+            return result == Success ? Finished : result;
         }
         return 0;
     }
     }
-    throw std::runtime_error("Unknown media frame type");
+    return fail(UnknownFrameType, "Unknown media frame type", 0, id);
 }
 
-void OutputNode::finishMedia() {
-    if (!m_media) return;
-    if (m_header_written) {
-        const int result = av_write_trailer(m_media);
-        if (result < 0) std::fprintf(stderr, "OutputNode: cannot finalize MP4 (%d)\n", result);
-    }
-    const int result = avio_closep(&m_media->pb);
-    if (result < 0) std::fprintf(stderr, "OutputNode: cannot close MP4 (%d)\n", result);
+int OutputNode::finishMedia() {
+    if (!m_media) return Success;
+    int status = Success;
+    if (m_header_written && logMediaResult(av_write_trailer(m_media),
+                                          "OutputNode: cannot finalize " + m_filename) < 0)
+        status = fail(MediaError, "cannot finalize output file");
+    if (m_media->pb && logMediaResult(avio_closep(&m_media->pb),
+                                    "OutputNode: cannot close " + m_filename) < 0)
+        status = fail(MediaError, "cannot close output file");
     avformat_free_context(m_media);
     m_media = nullptr;
     m_header_written = false;
     m_streams.clear();
     m_ended_streams = 0;
+    return status;
 }
