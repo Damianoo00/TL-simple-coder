@@ -34,6 +34,7 @@ class Graph{
         }
 
         void stop() {
+            for (auto& node : m_nodes) node->requestStop();
             for (auto& node : m_nodes) {
                 node->stop();
             }

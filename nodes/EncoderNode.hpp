@@ -24,6 +24,7 @@ private:
     AVAudioFifo* m_fifo = nullptr;
     AVRational m_input_time_base{0, 1};
     std::string m_codec_name;
+    std::string m_preset, m_tune;
     int64_t m_bitrate = 0;
     int m_threads = 1;
     int m_gop = 12;

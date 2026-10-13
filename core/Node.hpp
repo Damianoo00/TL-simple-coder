@@ -31,6 +31,10 @@ public:
 
     void start();
     void stop();
+    void requestStop();
+    void setQueueCapacity(std::size_t capacity) {
+        for (auto& queue : m_input) queue->setCapacity(capacity);
+    }
     void connect(NodeBase& next, std::size_t output_port = 0,
                  std::size_t input_port = 0);
 

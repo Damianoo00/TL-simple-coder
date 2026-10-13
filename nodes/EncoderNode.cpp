@@ -23,8 +23,14 @@ int EncoderNode::configure(std::unordered_map<std::string, std::string> config) 
     auto name = m_type == AVMEDIA_TYPE_VIDEO ? std::string("libx264") : std::string("aac");
     int64_t bitrate = m_type == AVMEDIA_TYPE_VIDEO ? 2000000 : 128000;
     int threads = 1, gop = 12, b_frames = 0;
+    std::string preset, tune;
     for (const auto& [key, value] : config) {
         if (key == "codec") { name = value; continue; }
+        if (m_type == AVMEDIA_TYPE_VIDEO && (key == "preset" || key == "tune")) {
+            if (value.empty()) return fail(InvalidConfiguration, "empty encoder preset or tune");
+            (key == "preset" ? preset : tune) = value;
+            continue;
+        }
         int64_t number = 0;
         const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
         if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
@@ -46,6 +52,7 @@ int EncoderNode::configure(std::unordered_map<std::string, std::string> config) 
     m_threads = threads;
     m_gop = gop;
     m_b_frames = b_frames;
+    m_preset = std::move(preset); m_tune = std::move(tune);
     m_status = Success;
     return Success;
 }
@@ -111,8 +118,15 @@ int EncoderNode::open(const MediaFrame& message) {
         if (format == parameters.format) supported = true;
     }
     if (!supported) return fail(InvalidConfigFrame, "encoder does not support input format; conversion required", 0, m_stream_id);
-    if (logMediaResult(avcodec_open2(m_codec, codec, nullptr), nodeType()) < 0)
+    AVDictionary* options = nullptr;
+    if (!m_preset.empty()) av_dict_set(&options, "preset", m_preset.c_str(), 0);
+    if (!m_tune.empty()) av_dict_set(&options, "tune", m_tune.c_str(), 0);
+    const int opened = avcodec_open2(m_codec, codec, &options);
+    const bool unused_options = av_dict_count(options) != 0;
+    av_dict_free(&options);
+    if (logMediaResult(opened, nodeType()) < 0)
         return fail(MediaError, "cannot open encoder", 0, m_stream_id);
+    if (unused_options) return fail(InvalidConfiguration, "encoder does not support requested preset or tune");
     if (m_type == AVMEDIA_TYPE_AUDIO) {
         m_fifo = av_audio_fifo_alloc(m_codec->sample_fmt, m_codec->ch_layout.nb_channels,
                                      std::max(1, m_codec->frame_size));

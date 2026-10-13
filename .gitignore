@@ -1,3 +1,4 @@
 /build/
 /CMakeUserPresets.json
 *.mp4
+/overlay-renderer/node_modules/

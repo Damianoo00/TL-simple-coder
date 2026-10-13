@@ -15,6 +15,8 @@ add_library(graph_core STATIC
     nodes/EncoderNode.cpp
     nodes/FrameTransformNode.cpp
     nodes/VideoScalerNode.cpp
+    nodes/BrowserRenderer.cpp
+    nodes/VideoOverlayNode.cpp
     nodes/AudioResamplerNode.cpp
     nodes/MuxerNode.cpp
     api/JsonGraphParser.cpp
@@ -23,6 +25,10 @@ target_compile_features(graph_core PUBLIC cxx_std_20)
 set_target_properties(graph_core PROPERTIES CXX_EXTENSIONS OFF)
 target_include_directories(graph_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(graph_core PUBLIC Threads::Threads nlohmann_json::nlohmann_json ffmpeg::avformat ffmpeg::avcodec ffmpeg::avutil ffmpeg::swscale ffmpeg::swresample)
+set(OVERLAY_ELECTRON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/overlay-renderer/node_modules/electron/dist/electron" CACHE FILEPATH "Electron executable for browser overlays")
+target_compile_definitions(graph_core PRIVATE
+    OVERLAY_ELECTRON_PATH="${OVERLAY_ELECTRON_PATH}"
+    OVERLAY_SCRIPT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/overlay-renderer/main.cjs")
 
 add_executable(graph_worker api/GraphWorker.cpp)
 target_link_libraries(graph_worker PRIVATE graph_core)
@@ -65,6 +71,13 @@ if(BUILD_TESTING)
     add_test(NAME typed_nodes COMMAND test_typed_nodes)
     set_tests_properties(typed_nodes PROPERTIES TIMEOUT 10)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(test_overlay_node tests/test_overlay_node.cpp)
+    target_link_libraries(test_overlay_node PRIVATE graph_core)
+    target_compile_definitions(test_overlay_node PRIVATE
+        TEST_PYTHON="${Python3_EXECUTABLE}"
+        FAKE_OVERLAY_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/tests/fake_overlay_renderer.py")
+    add_test(NAME overlay_node COMMAND test_overlay_node)
+    set_tests_properties(overlay_node PROPERTIES TIMEOUT 10)
     add_test(NAME integration
         COMMAND "${CMAKE_COMMAND}" -E env
             "PYTHONDONTWRITEBYTECODE=1"

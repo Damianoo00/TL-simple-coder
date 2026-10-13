@@ -1,0 +1,9 @@
+{
+  "name": "async-nodes-overlay-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "Continuous Chromium offscreen rendering for VideoOverlayNode",
+  "scripts": { "setup": "install-electron" },
+  "dependencies": { "electron": "44.7.0" }
+}

@@ -45,8 +45,11 @@ void NodeBase::start() {
             while ((result = process()) >= 0) ++steps;
         } catch (const std::exception& error) {
             result = MediaError;
+            m_status = result;
             std::fprintf(stderr, "Node: %s\n", error.what());
         }
+        // An ended consumer must release producers waiting on its bounded input.
+        for (auto& input : m_input) input->close();
         closeOutputs();
         const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         std::fprintf(stderr, "[info] %s: processing stopped result=%d steps=%zu elapsed=%.3fs stop_requested=%s\n",
@@ -54,8 +57,13 @@ void NodeBase::start() {
     });
 }
 
-void NodeBase::stop() {
+void NodeBase::requestStop() {
     m_stop_requested = true;
     for (auto& input : m_input) input->close();
+    closeOutputs();
+}
+
+void NodeBase::stop() {
+    requestStop();
     if (m_worker.joinable()) m_worker.join();
 }

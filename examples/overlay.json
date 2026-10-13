@@ -1,0 +1,118 @@
+{
+  "graph": [
+    {
+      "type": "InputNode",
+      "name": "input",
+      "configuration": [
+        {
+          "filename": "input.mp4"
+        }
+      ],
+      "connections": [
+        "demux"
+      ]
+    },
+    {
+      "type": "DemuxNode",
+      "name": "demux",
+      "configuration": [
+        {
+          "ports": "2"
+        }
+      ],
+      "connections": [
+        "video_decoder",
+        {
+          "node": "mux",
+          "output_port": 1,
+          "input_port": 1
+        }
+      ]
+    },
+    {
+      "type": "VideoDecoderNode",
+      "name": "video_decoder",
+      "configuration": [
+        {
+          "threads": "1"
+        }
+      ],
+      "connections": [
+        "overlay"
+      ]
+    },
+    {
+      "type": "VideoOverlayNode",
+      "name": "overlay",
+      "configuration": [
+        {
+          "url": "http://127.0.0.1:3000/overlay.html",
+          "width": "1920",
+          "height": "1080",
+          "fps": "60",
+          "render_mode": "cpu"
+        }
+      ],
+      "connections": [
+        "video_scaler"
+      ]
+    },
+    {
+      "type": "VideoScalerNode",
+      "name": "video_scaler",
+      "configuration": [
+        {
+          "pixel_format": "yuv420p",
+          "algorithm": "bilinear"
+        }
+      ],
+      "connections": [
+        "video_encoder"
+      ]
+    },
+    {
+      "type": "VideoEncoderNode",
+      "name": "video_encoder",
+      "configuration": [
+        {
+          "codec": "libx264",
+          "bit_rate": "6000000",
+          "threads": "2",
+          "preset": "ultrafast",
+          "tune": "zerolatency",
+          "gop_size": "120",
+          "max_b_frames": "0"
+        }
+      ],
+      "connections": [
+        {
+          "node": "mux",
+          "input_port": 0
+        }
+      ]
+    },
+    {
+      "type": "MuxerNode",
+      "name": "mux",
+      "configuration": [
+        {
+          "ports": "2"
+        }
+      ],
+      "connections": [
+        "output"
+      ]
+    },
+    {
+      "type": "OutputNode",
+      "name": "output",
+      "configuration": [
+        {
+          "filename": "build/overlay-output.mp4"
+        }
+      ],
+      "connections": []
+    }
+  ],
+  "queue_capacity": 8
+}

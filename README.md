@@ -117,7 +117,7 @@ ponownej kompilacji.
 Konfiguracja zawiera niepustą tablicę `graph`. Każdy węzeł ma unikalną,
 niepustą nazwę `name`, `type` (`InputNode`, `OutputNode`, `DemuxNode`, `MuxerNode`,
 `VideoDecoderNode`, `AudioDecoderNode`, `VideoEncoderNode`, `AudioEncoderNode`,
-`VideoScalerNode` lub `AudioResamplerNode`),
+`VideoScalerNode`, `VideoOverlayNode` lub `AudioResamplerNode`),
 tablicę `configuration` obiektów z parametrami tekstowymi oraz tablicę
 `connections` z nazwami następnych węzłów lub obiektami mapowania portów;
 pusta tablica oznacza brak połączeń wychodzących.
@@ -228,9 +228,10 @@ plik wejściowy. Testy integracyjne wymagają programów `ffmpeg` i `ffprobe` w 
 - `NodeBase` i `Graph` są obecnie przeznaczone do pojedynczego cyklu start/stop.
   Rejestrację portów, `connect()` i konfigurację należy wykonywać przed startem;
   zmiana połączeń podczas pracy nie jest synchronizowana.
-- `Graph::stop()` zamyka węzły w kolejności dodania. Aby opróżnić cały potok,
-  dodawaj węzły od źródła do odbiornika, jak w obecnym przykładzie. Dowolna
-  kolejność lub cykle wymagają odrębnego mechanizmu zamykania grafu.
+- `Graph::stop()` najpierw zamyka kolejki wszystkich węzłów i zgłasza zatrzymanie,
+  a następnie dołącza ich wątki. Zatrzymanie przerywa potok; do pełnego zapisu
+  poczekaj na naturalny EOF. Zamknięcie odblokowuje również producentów czekających
+  na miejsce w ograniczonych kolejkach.
 - Klasa `Supervisor` synchronizuje rejestr procesów, odbiera zakończone dzieci
   i udostępnia ich kod zakończenia lub sygnał. Nie restartuje workera po awarii.
 - Jest to własny supervisor w C++, niezależny od zewnętrznego `supervisord`.
@@ -361,6 +362,126 @@ zamień połączenia demuxera. Uruchomienie: `./build/graph_worker examples/tran
 Nody używają [API send/receive FFmpeg](https://ffmpeg.org/doxygen/7.1/group__lavc__encdec.html).
 Obecne kolejki, bufory, FFmpeg i synchroniczne logi nadal nie gwarantują
 ściśle ograniczonego czasu wykonania.
+
+### Dynamiczny overlay WWW w czasie rzeczywistym
+
+`VideoOverlayNode` uruchamia osobny proces Electron/Chromium, który stale renderuje
+HTML, CSS i JavaScript wskazanego URL. WebSockety i animacje działają bez przeładowywania
+strony. Renderer offscreen przekazuje surowy obraz BGRA z premultiplied alpha przez
+prywatne gniazdo Unix. Nie używamy zrzutów PNG/JPEG ani odpytywania strony co klatkę.
+Tryb `cpu` działa bez dedykowanego GPU. Renderer i odbiorca przechowują najnowszy obraz;
+wolniejszy odbiór nie tworzy kolejki historycznych obrazów overlayu.
+
+Potok przykładowy jest w `examples/overlay.json`:
+
+```text
+InputNode → DemuxNode → VideoDecoderNode → VideoOverlayNode
+                                            ↓
+                  VideoScalerNode → VideoEncoderNode → MuxerNode → OutputNode
+                audio z DemuxNode ────────────────────────↑
+```
+
+Przykład zakłada wideo na porcie 0 i audio na porcie 1. Audio jest remuksowane
+bez ponownego kodowania. Wejściem jest `input.mp4`, wyjściem `build/overlay-output.mp4`.
+Przetwarzanie trwa tyle co materiał, ponieważ strona używa czasu rzeczywistego.
+To zapis MP4 w czasie rzeczywistym; przykład nie dodaje podglądu ani transmisji RTMP.
+
+Instalacja renderera wymaga Node.js >=22.12 oraz npm; zależności C++ pozostają bez zmian:
+
+```sh
+npm ci --prefix overlay-renderer
+npm run setup --prefix overlay-renderer
+cmake --build build -j2
+```
+
+Electron 44 wymaga osobnego kroku `setup`, który pobiera binarny Chromium.
+Na tym stanowisku Node.js jest również dostępny lokalnie w `build/tooling`:
+
+```sh
+export PATH="$PWD/build/tooling/node-v22.20.0-linux-x64/bin:$PATH"
+```
+
+Uruchom serwer overlayów w pierwszym terminalu:
+
+```sh
+python3 scripts/start_trybuna_overlay.py ~/Documents/Trybuna-Live-Overlays
+```
+
+Skrypt kopiuje źródła do `build/trybuna-overlay`, instaluje zależności, buduje
+aplikację i uruchamia jej serwer. Oryginalny projekt nie jest zmieniany.
+Jeżeli serwer już działa, użyj jego URL w konfiguracji i pomiń ten krok.
+Domyślne adresy: overlay `http://127.0.0.1:3000/overlay.html`,
+kontroler `http://127.0.0.1:3000/controller.html`.
+
+W drugim terminalu:
+
+```sh
+./build/graph_worker examples/overlay.json
+```
+
+Zmieniaj wynik, widoczność i pozostałe elementy w kontrolerze podczas przetwarzania.
+Po komunikacie `finalized=yes reason=end_of_stream` plik jest gotowy; worker nadal
+czeka na sygnał, zgodnie z dotychczasowym działaniem. Zakończ go przez Ctrl+C.
+
+| Parametr `VideoOverlayNode` | Znaczenie |
+| --- | --- |
+| `url` | Wymagany URL HTTP/HTTPS |
+| `width`, `height` | Rozmiar strony; domyślnie `1920`, `1080`, zakres 1–4096 |
+| `fps` | FPS renderera i wyjścia wideo; domyślnie `60`, zakres 1–120 |
+| `render_mode` | `cpu` (domyślnie) lub `gpu` dla akceleracji Chromium |
+| `renderer_executable` | Opcjonalna ścieżka do binarnego Electrona |
+| `renderer_script` | Opcjonalna ścieżka do `overlay-renderer/main.cjs` |
+
+Wartości konfiguracji są stringami. Rozmiar strony Trybuny jest zapisany w jej CSS
+jako 1920×1080; pozostaw taki canvas, także dla mniejszego wideo. Node skaluje overlay
+do rozdzielczości wejścia, zachowując rozdzielczość wideo. Wyjściem są ramki BGRA;
+przed enkoderem H.264 potrzebny jest `VideoScalerNode` z `pixel_format: yuv420p`.
+
+Node generuje stały FPS według PTS. Dla wideo 30 FPS i overlayu 60 FPS powtarza
+obraz wideo pomiędzy klatkami, za każdym razem nakładając aktualny obraz strony.
+Nie interpoluje ruchu samego wideo. Zachowuje ID strumienia i początek osi czasu;
+time base wyjścia wynosi `1/fps`. Wymaga monotonicznych PTS. Ostatnią klatkę domyka
+według jej czasu trwania lub wejściowego frame rate. Jeden obraz źródła jest
+buforowany w celu ustalenia przedziału jego prezentacji. Pusty strumień zachowuje
+CONFIGFRAME/ENDFRAME. Renderer musi załadować stronę i dostarczyć pierwszy obraz
+w ciągu 30 sekund; rozłączenie renderera jest błędem przetwarzania.
+
+Pole `queue_capacity` na poziomie dokumentu JSON ogranicza liczbę wiadomości w każdej
+kolejce wejściowej (1–65536). Przykład używa `8`, żeby ograniczyć pamięć i buforowanie.
+Brak pola zachowuje dotychczasowe kolejki bez limitu. Producent czeka na miejsce;
+zamknięcie kolejki odblokowuje zarówno producentów, jak i odbiorców. Dla nietypowego
+przeplotu strumieni trzeba dobrać większy limit, aby demuxer nie blokował dostarczenia
+strumienia, na który czeka muxer. Węzły nadal nie obsługują dowolnych grafów cyklicznych.
+
+Enkoder wideo przyjmuje także `preset` i `tune`, przekazywane do kodeka. Przykład
+wybiera H.264 `ultrafast`, `zerolatency`, dwa wątki i zero klatek B, żeby ograniczyć
+koszt CPU i opóźnienie. Te opcje muszą być obsługiwane przez wybrany kodek.
+
+Logi co pięć sekund pokazują `received_fps`, `video_fps`, `late_frames` i `pts_lag_ms`.
+Statyczna strona może nie wysyłać nowych obrazów; to normalne. `transport_skips`
+oznacza zdarzenia paint podczas zajętego transportu — najnowszy obraz jest wysyłany
+po zakończeniu bieżącego zapisu. Jeżeli `late_frames` lub opóźnienie rosną, sprzęt
+nie utrzymuje wybranego tempa: zmniejsz FPS lub rozdzielczość wideo przed overlayem,
+albo sprawdź `render_mode: gpu`. Sama deklaracja 60 FPS nie gwarantuje wydajności.
+
+Linux wymaga sesji graficznej (X11/Wayland), także dla niewidocznego okna offscreen;
+na serwerze można użyć Xvfb. Sandbox Chromium pozostaje włączony, a strona nie ma
+dostępu do Node.js. Renderer używa osobnego tymczasowego profilu i usuwa go przy
+poprawnym zamknięciu. Ten potok obsługuje programowe ramki SDR; sprzętowe AVFrame
+i kompozycja HDR wymagają osobnej obsługi.
+
+Weryfikacja z uruchomioną **testową kopią** serwera Trybuny:
+
+```sh
+ctest --test-dir build --output-on-failure
+python3 scripts/verify_trybuna_overlay.py
+```
+
+Test C++ sprawdza premultiplied alpha, przezroczyste i nieprzezroczyste piksele,
+konwersję FPS, PTS, EOF oraz odblokowanie ograniczonej kolejki przy zamknięciu.
+Skrypt z Chromium zmienia wynik i widoczność, zapisuje film 60 FPS z audio i obrazy
+kontrolne w `build`, a następnie przywraca stan kontrolera. Wymaga przykładowego
+`input.mp4`, ffmpeg/ffprobe, działającego serwera i sesji graficznej.
 
 ### Logi przetwarzania
 

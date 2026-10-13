@@ -9,6 +9,7 @@
 #include "nodes/VideoEncoderNode.hpp"
 #include "nodes/AudioEncoderNode.hpp"
 #include "nodes/VideoScalerNode.hpp"
+#include "nodes/VideoOverlayNode.hpp"
 #include "nodes/AudioResamplerNode.hpp"
 
 #include <nlohmann/json.hpp>
@@ -21,6 +22,15 @@
 #include <vector>
 
 namespace {
+std::size_t queueCapacity(const nlohmann::json& document) {
+    if (!document.contains("queue_capacity")) return 0;
+    const auto& value = document.at("queue_capacity");
+    if (!value.is_number_integer() ||
+        (!value.is_number_unsigned() && value.get<std::int64_t>() <= 0) ||
+        value.get<std::uint64_t>() == 0 || value.get<std::uint64_t>() > 65536)
+        throw std::runtime_error("queue_capacity must be an integer from 1 to 65536");
+    return value.get<std::size_t>();
+}
 struct Connection {
     std::string target;
     std::size_t output_port;
@@ -43,6 +53,7 @@ std::string requiredString(const nlohmann::json& object, const char* key) {
 }
 
 std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
+    queueCapacity(document);
     const auto& entries = document.at("graph");
     if (!entries.is_array() || entries.empty()) {
         throw std::runtime_error("graph must be a non-empty array");
@@ -58,7 +69,7 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
             definition.type != "DemuxNode" && definition.type != "MuxerNode" &&
             definition.type != "VideoDecoderNode" && definition.type != "AudioDecoderNode" &&
             definition.type != "VideoEncoderNode" && definition.type != "AudioEncoderNode" &&
-            definition.type != "VideoScalerNode" && definition.type != "AudioResamplerNode") {
+            definition.type != "VideoScalerNode" && definition.type != "VideoOverlayNode" && definition.type != "AudioResamplerNode") {
             throw std::runtime_error("Unknown node type: " + definition.type);
         }
         if (!names.emplace(definition.name, definitions.size()).second) {
@@ -144,13 +155,13 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
                 throw std::runtime_error("Invalid input port for node " + connection.target);
             const auto& target_type = definitions[target->second].type;
             const bool sends_frames = definition.type == "VideoDecoderNode" || definition.type == "AudioDecoderNode" ||
-                                      definition.type == "VideoScalerNode" || definition.type == "AudioResamplerNode";
+                                      definition.type == "VideoScalerNode" || definition.type == "VideoOverlayNode" || definition.type == "AudioResamplerNode";
             const bool takes_frames = target_type == "VideoEncoderNode" || target_type == "AudioEncoderNode" ||
-                                      target_type == "VideoScalerNode" || target_type == "AudioResamplerNode";
+                                      target_type == "VideoScalerNode" || target_type == "VideoOverlayNode" || target_type == "AudioResamplerNode";
             if (sends_frames != takes_frames)
                 throw std::runtime_error("Incompatible packet/frame connection from " + definition.name + " to " + connection.target);
-            const bool sends_video = definition.type == "VideoDecoderNode" || definition.type == "VideoScalerNode";
-            const bool takes_video = target_type == "VideoEncoderNode" || target_type == "VideoScalerNode";
+            const bool sends_video = definition.type == "VideoDecoderNode" || definition.type == "VideoScalerNode" || definition.type == "VideoOverlayNode";
+            const bool takes_video = target_type == "VideoEncoderNode" || target_type == "VideoScalerNode" || target_type == "VideoOverlayNode";
             if (sends_frames && sends_video != takes_video)
                 throw std::runtime_error("Incompatible audio/video connection from " + definition.name + " to " + connection.target);
             if (!used_outputs.emplace(connection.output_port, true).second)
@@ -177,7 +188,8 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
         if (!file.is_open()) {
             throw std::runtime_error("Cannot open configuration file");
         }
-        const auto definitions = readDefinitions(nlohmann::json::parse(file));
+        const auto document = nlohmann::json::parse(file);
+        const auto definitions = readDefinitions(document);
         auto graph = std::make_unique<Graph>();
         std::unordered_map<std::string, NodeBase*> nodes;
         for (const auto& definition : definitions) {
@@ -200,6 +212,8 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
                 node = &graph->addNode<AudioEncoderNode>();
             } else if (definition.type == "VideoScalerNode") {
                 node = &graph->addNode<VideoScalerNode>();
+            } else if (definition.type == "VideoOverlayNode") {
+                node = &graph->addNode<VideoOverlayNode>();
             } else {
                 node = &graph->addNode<AudioResamplerNode>();
             }
@@ -207,6 +221,7 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
                 const int result = node->configure(definition.configuration);
                 if (result != NodeBase::Success)
                     throw std::runtime_error("configuration failed, code=" + std::to_string(result));
+                node->setQueueCapacity(queueCapacity(document));
             } catch (const std::exception& error) {
                 throw std::runtime_error("Node " + definition.name + ": " + error.what());
             }
