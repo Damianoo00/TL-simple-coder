@@ -30,5 +30,7 @@ private:
     int m_b_frames = 0;
     int m_stream_id = -1;
     int64_t m_audio_pts = AV_NOPTS_VALUE;
+    std::size_t m_packets = 0;
+    std::size_t m_frames = 0;
     bool m_finished = false;
 };

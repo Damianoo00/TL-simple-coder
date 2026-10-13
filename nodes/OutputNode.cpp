@@ -17,7 +17,9 @@ int OutputNode::configure(std::unordered_map<std::string, std::string> config) {
         return fail(MediaError, "cannot open output file");
     }
     m_filename = filename;
+    m_packets_written = 0;
     m_status = Success;
+    std::fprintf(stderr, "[info] OutputNode: opened file=\"%s\"\n", m_filename.c_str());
     return Success;
 }
 
@@ -46,7 +48,7 @@ int OutputNode::process() {
             finishMedia();
             return m_status;
         }
-        const int result = finishMedia();
+        const int result = finishMedia("queue_closed");
         return result == Success ? Finished : result;
     }
     const int id = message->stream_id;
@@ -86,6 +88,7 @@ int OutputNode::process() {
         copy->pos = -1;
         if (logMediaResult(av_interleaved_write_frame(m_media, copy.get()), "OutputNode: Cannot write MP4 packet " + m_filename) < 0)
             return fail(MediaError, "Cannot write MP4 packet", 0, id);
+        ++m_packets_written;
         return 0;
     }
     case MediaPacket::Type::ENDFRAME: {
@@ -97,7 +100,7 @@ int OutputNode::process() {
         if (writeHeader() != Success) return m_status;
         found->second.ended = true;
         if (++m_ended_streams == m_streams.size()) {
-            const int result = finishMedia();
+            const int result = finishMedia("end_of_stream");
             return result == Success ? Finished : result;
         }
         return 0;
@@ -106,15 +109,20 @@ int OutputNode::process() {
     return fail(UnknownFrameType, "Unknown media frame type", 0, id);
 }
 
-int OutputNode::finishMedia() {
+int OutputNode::finishMedia(const char* reason) {
     if (!m_media) return Success;
     int status = Success;
+    const bool had_output = m_media->pb != nullptr;
     if (m_header_written && logMediaResult(av_write_trailer(m_media),
                                           "OutputNode: cannot finalize " + m_filename) < 0)
         status = fail(MediaError, "cannot finalize output file");
     if (m_media->pb && logMediaResult(avio_closep(&m_media->pb),
                                     "OutputNode: cannot close " + m_filename) < 0)
         status = fail(MediaError, "cannot close output file");
+    if (had_output && !m_filename.empty())
+        std::fprintf(stderr, "[info] OutputNode: output closed file=\"%s\" packets=%zu streams=%zu ended_streams=%zu finalized=%s reason=%s\n",
+                     m_filename.c_str(), m_packets_written, m_streams.size(), m_ended_streams,
+                     m_header_written && status == Success ? "yes" : "no", reason);
     avformat_free_context(m_media);
     m_media = nullptr;
     m_header_written = false;

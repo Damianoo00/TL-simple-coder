@@ -16,6 +16,7 @@ void EncoderNode::reset() {
     m_stream_id = -1;
     m_audio_pts = AV_NOPTS_VALUE;
     m_finished = false;
+    m_packets = m_frames = 0;
 }
 
 int EncoderNode::configure(std::unordered_map<std::string, std::string> config) {
@@ -122,7 +123,11 @@ int EncoderNode::open(const MediaFrame& message) {
     std::shared_ptr<AVCodecParameters> owned(raw, [](AVCodecParameters* p) { avcodec_parameters_free(&p); });
     if (logMediaResult(avcodec_parameters_from_context(raw, m_codec), nodeType()) < 0)
         return fail(MediaError, "cannot export encoder parameters", 0, m_stream_id);
-    return send(MediaPacket::configFrame(m_stream_id, {std::move(owned), m_codec->time_base, m_codec->framerate}));
+    const int sent = send(MediaPacket::configFrame(m_stream_id, {std::move(owned), m_codec->time_base, m_codec->framerate}));
+    if (sent == Success)
+        std::fprintf(stderr, "[info] %s: encoder opened codec=%s stream_id=%d bit_rate=%lld threads=%d\n",
+                     nodeType(), codec->name, m_stream_id, static_cast<long long>(m_bitrate), m_threads);
+    return sent;
 }
 
 int EncoderNode::receive(bool draining) {
@@ -142,6 +147,7 @@ int EncoderNode::receive(bool draining) {
             raw->duration = av_rescale_q(1, av_inv_q(m_codec->framerate), m_codec->time_base);
         const int sent = send(MediaPacket::dataFrame(m_stream_id, std::move(packet)));
         if (sent != Success) return sent;
+        ++m_packets;
     }
 }
 
@@ -211,6 +217,9 @@ int EncoderNode::process() {
         if (result != Success) return result;
         const int sent = send(MediaPacket::endFrame(m_stream_id));
         m_finished = true;
+        if (sent == Success)
+            std::fprintf(stderr, "[info] %s: encoding finished stream_id=%d frames=%zu packets=%zu\n",
+                         nodeType(), m_stream_id, m_frames, m_packets);
         return sent == Success ? Finished : sent;
     }
     if (message->type != MediaFrame::Type::DATAFRAME)
@@ -222,7 +231,9 @@ int EncoderNode::process() {
         if (frame->format != m_codec->sample_fmt || frame->sample_rate != m_codec->sample_rate || frame->nb_samples <= 0 ||
             av_channel_layout_compare(&frame->ch_layout, &m_codec->ch_layout))
             return fail(InvalidDataFrame, "audio format differs from CONFIGFRAME", 0, m_stream_id);
-        return audio(frame.get(), false);
+        const int result = audio(frame.get(), false);
+        if (result == Success) ++m_frames;
+        return result;
     }
     if (frame->format != m_codec->pix_fmt || frame->width != m_codec->width || frame->height != m_codec->height)
         return fail(InvalidDataFrame, "video format differs from CONFIGFRAME", 0, m_stream_id);
@@ -233,5 +244,7 @@ int EncoderNode::process() {
     if (raw->duration > 0) raw->duration = av_rescale_q(raw->duration, m_input_time_base, m_codec->time_base);
     raw->time_base = m_codec->time_base;
     raw->pict_type = AV_PICTURE_TYPE_NONE;
-    return encode(raw);
+    const int result = encode(raw);
+    if (result == Success) ++m_frames;
+    return result;
 }

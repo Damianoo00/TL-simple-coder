@@ -16,7 +16,8 @@ public:
 
 private:
     const char* nodeType() const override { return "OutputNode"; }
-    int finishMedia();
+    int finishMedia(const char* reason = "cleanup");
+    std::size_t m_packets_written = 0;
     AVFormatContext* m_media = nullptr;
     struct StreamState {
         AVRational time_base;

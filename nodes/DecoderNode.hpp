@@ -20,5 +20,7 @@ private:
     int m_stream_id = -1;
     int m_threads = 1;
     bool m_config_sent = false;
+    std::size_t m_packets = 0;
+    std::size_t m_frames = 0;
     bool m_finished = false;
 };

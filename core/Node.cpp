@@ -1,6 +1,7 @@
 #include "Node.hpp"
 
 #include <cstdio>
+#include <chrono>
 
 NodeBase::~NodeBase() {
     stop();
@@ -36,12 +37,20 @@ void NodeBase::closeOutputs() {
 void NodeBase::start() {
     if (m_worker.joinable()) return;
     m_worker = std::thread([this]() {
+        const auto started = std::chrono::steady_clock::now();
+        std::fprintf(stderr, "[info] %s: processing started\n", nodeType());
+        std::size_t steps = 0;
+        int result = Finished;
         try {
-            while (process() >= 0) {}
+            while ((result = process()) >= 0) ++steps;
         } catch (const std::exception& error) {
+            result = MediaError;
             std::fprintf(stderr, "Node: %s\n", error.what());
         }
         closeOutputs();
+        const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        std::fprintf(stderr, "[info] %s: processing stopped result=%d steps=%zu elapsed=%.3fs stop_requested=%s\n",
+                     nodeType(), result, steps, elapsed, m_stop_requested.load() ? "yes" : "no");
     });
 }
 

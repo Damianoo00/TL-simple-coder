@@ -82,7 +82,8 @@ class Mp4Tests(unittest.TestCase):
                 worker.terminate()
                 _, stderr = worker.communicate(timeout=5)
                 self.assertEqual(worker.returncode, 0, stderr)
-                self.assertNotIn('Node:', stderr)
+                self.assertNotIn('code=-', stderr)
+                self.assertNotRegex(stderr, r'(?m)^Node: ')
             finally:
                 if worker.poll() is None:
                     worker.kill()

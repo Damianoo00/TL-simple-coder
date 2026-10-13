@@ -19,6 +19,7 @@ int DecoderNode::configure(std::unordered_map<std::string, std::string> config) 
     m_stream_id = -1;
     m_threads = threads;
     m_config_sent = m_finished = false;
+    m_packets = m_frames = 0;
     m_status = Success;
     return Success;
 }
@@ -48,6 +49,8 @@ int DecoderNode::open(const MediaPacket& message) {
     m_codec->thread_count = m_threads;
     if (logMediaResult(avcodec_open2(m_codec, codec, nullptr), nodeType()) < 0)
         return fail(MediaError, "cannot open decoder", 0, m_stream_id);
+    std::fprintf(stderr, "[info] %s: decoder opened codec=%s stream_id=%d threads=%d\n",
+                 nodeType(), codec->name, m_stream_id, m_threads);
     return Success;
 }
 
@@ -87,6 +90,7 @@ int DecoderNode::receive(bool draining) {
         raw->time_base = m_config->time_base;
         const int sent = send(MediaFrame::dataFrame(m_stream_id, std::move(frame)));
         if (sent != Success) return sent;
+        ++m_frames;
     }
 }
 
@@ -111,6 +115,7 @@ int DecoderNode::process() {
     const int result = avcodec_send_packet(m_codec, draining ? nullptr : message->packet.get());
     if (logMediaResult(result, nodeType()) < 0)
         return fail(MediaError, "cannot send packet to decoder", 0, m_stream_id);
+    if (!draining) ++m_packets;
     const int received = receive(draining);
     if (received != Success) return received;
     if (!draining) return Success;
@@ -121,5 +126,8 @@ int DecoderNode::process() {
     }
     const int sent = send(MediaFrame::endFrame(m_stream_id));
     m_finished = true;
+    if (sent == Success)
+        std::fprintf(stderr, "[info] %s: decoding finished stream_id=%d packets=%zu frames=%zu\n",
+                     nodeType(), m_stream_id, m_packets, m_frames);
     return sent == Success ? Finished : sent;
 }

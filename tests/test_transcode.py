@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -63,6 +64,17 @@ class TranscodeTests(unittest.TestCase):
                 self.assertEqual(worker.returncode, 0, stderr)
                 self.assertIsNotNone(actual, stderr)
                 self.assertNotIn('code=-', stderr)
+                progress = [int(value) for value in re.findall(r'InputNode: read progress=(\d+)%', stderr)]
+                self.assertGreaterEqual(len(progress), 2, stderr)
+                self.assertEqual((progress[0], progress[-1]), (0, 100))
+                self.assertEqual(progress, sorted(set(progress)))
+                self.assertLessEqual(len(progress), 22)
+                for node_type in ('InputNode', 'DemuxNode', 'MuxerNode', 'OutputNode', 'VideoEncoderNode', 'VideoDecoderNode'):
+                    self.assertIn(f'{node_type}: processing started', stderr)
+                    self.assertIn(f'{node_type}: processing stopped', stderr)
+                self.assertIn('VideoEncoderNode: encoding finished', stderr)
+                self.assertIn('VideoDecoderNode: decoding finished', stderr)
+                self.assertIn('finalized=yes reason=end_of_stream', stderr)
                 self.assertEqual([s['codec_name'] for s in actual], ['h264', 'aac'] if audio else ['h264'])
                 self.assertEqual((actual[0]['width'], actual[0]['height']), (64, 48))
                 self.assertAlmostEqual(float(actual[0]['duration']), 1.0, delta=0.02)

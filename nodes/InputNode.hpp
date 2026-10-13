@@ -16,6 +16,12 @@ public:
 
 private:
     const char* nodeType() const override { return "InputNode"; }
+    int progressPercent(const AVPacket& packet) const;
+    void logProgress(int percent);
+    std::size_t m_packets_read = 0;
+    int m_last_progress = -1;
+    bool m_progress_started = false;
+    bool m_finished = false;
     AVFormatContext* m_media = nullptr;
     std::vector<MediaStream> m_streams;
     std::size_t m_next_config = 0;

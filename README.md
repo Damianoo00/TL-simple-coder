@@ -359,3 +359,25 @@ zamień połączenia demuxera. Uruchomienie: `./build/graph_worker examples/tran
 Nody używają [API send/receive FFmpeg](https://ffmpeg.org/doxygen/7.1/group__lavc__encdec.html).
 Obecne kolejki, bufory, FFmpeg i synchroniczne logi nadal nie gwarantują
 ściśle ograniczonego czasu wykonania.
+
+### Logi przetwarzania
+
+Logi trafiają na stderr. Każdy wątek noda wypisuje rozpoczęcie i zakończenie
+przetwarzania z kodem wyniku, liczbą wywołań `process()` zakończonych sukcesem
+oraz czasem pracy. Dekodery i enkodery podają wybrany kodek, ID strumienia
+oraz końcową liczbę ramek i pakietów. OutputNode podaje plik wyjściowy,
+liczbę zapisanych pakietów i informację, czy udało się go sfinalizować.
+
+InputNode wypisuje `read progress=0%` i kolejne wartości po wzroście o co najmniej
+5 punktów procentowych, a `100%` dopiero po EOF i przekazaniu wszystkich ENDFRAME.
+Procent jest obliczany z DTS (lub PTS, jeśli DTS nie istnieje) i czasu trwania
+pakietu w odniesieniu do długości pliku, z uwzględnieniem czasu początkowego
+kontenera. Wartości nie maleją i nie osiągają 100% przed EOF.
+Przy nieznanej długości pojawia się `progress=unavailable reason=unknown_duration`;
+EOF nadal jest raportowane jako zakończenie odczytu (100%).
+
+Ten procent dotyczy odczytu i przekazania materiału do grafu. Enkodery mogą
+jeszcze przetwarzać kolejki i opróżniać bufory; zakończenie transkodu potwierdzają
+ich wpisy `encoding finished` i zamknięcie pliku przez OutputNode z
+`finalized=yes reason=end_of_stream`. Anulowanie lub błąd nie generuje wpisu
+InputNode z 100%, jeśli wejście nie dotarło wcześniej do EOF.
