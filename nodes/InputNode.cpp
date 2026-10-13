@@ -22,7 +22,7 @@ int InputNode::configure(std::unordered_map<std::string, std::string> config) {
         if (logMediaResult(avcodec_parameters_copy(codec, raw->streams[i]->codecpar),
                            "InputNode: cannot copy stream parameters") < 0)
             return fail(MediaError, "cannot copy stream parameters", 0, static_cast<int>(i));
-        streams.push_back({std::move(owned), raw->streams[i]->time_base});
+        streams.push_back({std::move(owned), raw->streams[i]->time_base, av_guess_frame_rate(raw, raw->streams[i], nullptr)});
     }
     m_filename = filename;
     avformat_close_input(&m_media);

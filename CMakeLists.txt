@@ -11,6 +11,8 @@ add_library(graph_core STATIC
     nodes/InputNode.cpp
     nodes/OutputNode.cpp
     nodes/DemuxNode.cpp
+    nodes/DecoderNode.cpp
+    nodes/EncoderNode.cpp
     nodes/MuxerNode.cpp
     api/JsonGraphParser.cpp
 )
@@ -41,6 +43,10 @@ add_custom_target(run
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(test_codec_nodes tests/test_codec_nodes.cpp)
+    target_link_libraries(test_codec_nodes PRIVATE graph_core)
+    add_test(NAME codec_nodes COMMAND test_codec_nodes)
+    set_tests_properties(codec_nodes PROPERTIES TIMEOUT 20)
     add_executable(test_demux_mux tests/test_demux_mux.cpp)
     target_link_libraries(test_demux_mux PRIVATE graph_core)
     add_test(NAME demux_mux COMMAND test_demux_mux)

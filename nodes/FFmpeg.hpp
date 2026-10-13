@@ -25,6 +25,7 @@ inline int logMediaResult(int result, const std::string& operation) {
 struct MediaStream {
     std::shared_ptr<AVCodecParameters> codec;
     AVRational time_base;
+    AVRational frame_rate{0, 1};
 };
 using AVPacketPtr = std::shared_ptr<AVPacket>;
 

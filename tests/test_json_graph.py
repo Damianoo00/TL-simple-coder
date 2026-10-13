@@ -128,6 +128,22 @@ class JsonGraphTests(unittest.TestCase):
             with self.subTest(configuration=configuration):
                 self.assert_rejected(self.write_config(configuration))
 
+    def test_incompatible_codec_connections_do_not_truncate_output(self):
+        for decoder, encoder in (("VideoDecoderNode", "AudioEncoderNode"),
+                                 ("AudioDecoderNode", "VideoEncoderNode")):
+            config = {"graph": [
+                {"type": "InputNode", "name": "input", "configuration": [{"filename": "input.mp4"}], "connections": ["decoder"]},
+                {"type": decoder, "name": "decoder", "configuration": [], "connections": ["encoder"]},
+                {"type": encoder, "name": "encoder", "configuration": [], "connections": ["output"]},
+                {"type": "OutputNode", "name": "output", "configuration": [{"filename": "output.mp4"}], "connections": []},
+            ]}
+            with self.subTest(decoder=decoder, encoder=encoder):
+                self.assert_rejected(self.write_config(config))
+        config = copy.deepcopy(self.config)
+        config["graph"].insert(1, {"type": "VideoEncoderNode", "name": "encoder", "configuration": [], "connections": ["output"]})
+        config["graph"][0]["connections"] = ["encoder"]
+        self.assert_rejected(self.write_config(config))
+
     def test_invalid_json_and_missing_file(self):
         path = self.root / "broken.json"
         path.write_text('{"graph": [],}')

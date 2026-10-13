@@ -115,7 +115,8 @@ czyta cały plik niezależnie. Zmiana danych lub konfiguracji nie wymaga
 ponownej kompilacji.
 
 Konfiguracja zawiera niepustą tablicę `graph`. Każdy węzeł ma unikalną,
-niepustą nazwę `name`, `type` (`InputNode`, `OutputNode`, `DemuxNode` albo `MuxerNode`),
+niepustą nazwę `name`, `type` (`InputNode`, `OutputNode`, `DemuxNode`, `MuxerNode`,
+`VideoDecoderNode`, `AudioDecoderNode`, `VideoEncoderNode` lub `AudioEncoderNode`),
 tablicę `configuration` obiektów z parametrami tekstowymi oraz tablicę
 `connections` z nazwami następnych węzłów lub obiektami mapowania portów;
 pusta tablica oznacza brak połączeń wychodzących.
@@ -250,7 +251,7 @@ graph.connect(input, output);
 
 `connect()` i `Graph::connect()` sprawdzają zgodność typów kolejek w czasie
 działania. Parser JSON obsługuje konkretne typy `InputNode`, `OutputNode`, `DemuxNode`
-i `MuxerNode`; typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
+i `MuxerNode` oraz cztery nody dekodowania/kodowania; typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
 i z wyjścia `OutputNode` przed otwarciem plików.
 W destruktorze własnego węzła wywołaj `stop()` przed zniszczeniem jego zasobów,
 jak robią `InputNode` i `OutputNode`.
@@ -305,3 +306,56 @@ Parser sprawdza zakresy portów, powtórzone połączenia i kompletność wejś�
 MuxerNode przed otwarciem plików. Przykład całego potoku
 `InputNode -> DemuxNode -> MuxerNode -> OutputNode` znajduje się
 w `examples/demux_mux.json`.
+
+### Dekodowanie i kodowanie
+
+`VideoDecoderNode` i `AudioDecoderNode` przyjmują `MediaPacket` i zwracają
+`MediaFrame` zawierający surowy `AVFrame`. `VideoEncoderNode` i
+`AudioEncoderNode` przyjmują `MediaFrame` i zwracają `MediaPacket`.
+Każdy z tych nodów ma jedno wejście, jedno wyjście i obsługuje jeden strumień.
+Wszystkie zachowują ID strumienia oraz protokół CONFIGFRAME/DATAFRAME/ENDFRAME.
+Surowa konfiguracja opisuje format pikseli lub próbek, wymiary lub układ kanałów,
+time base oraz opcjonalny frame rate. Codec ID w konfiguracji surowej opisuje
+kodek źródłowy, a enkoder wybiera własny kodek wyjściowy.
+
+Dekoder otwiera kodek po CONFIGFRAME; konfigurację wyjściową wysyła przed
+pierwszą zdekodowaną ramką, kiedy znany jest rzeczywisty format. Pusty strumień
+również otrzymuje CONFIGFRAME i ENDFRAME. Przed ENDFRAME nody opróżniają bufory
+kodeka, w tym opóźnione klatki B. Zamknięcie kolejki bez ENDFRAME oznacza
+anulowanie: bufory są zwalniane bez generowania sztucznego EOF.
+
+| Parametr | Dekodery | Enkoder wideo | Enkoder audio |
+| --- | --- | --- | --- |
+| `threads` | dodatnia liczba, domyślnie `1` | domyślnie `1` | domyślnie `1` |
+| `codec` | wybierany z CONFIGFRAME | domyślnie AVC/H.264 (`libx264`) | domyślnie `aac` |
+| `bit_rate` | — | dodatnia liczba bit/s, domyślnie `2000000` | domyślnie `128000` |
+| `gop_size` | — | dodatnia liczba, domyślnie `12` | — |
+| `max_b_frames` | — | `0`–`16`, domyślnie `0` | — |
+
+W JSON wszystkie wartości konfiguracji są stringami. Kodek musi być dostępny
+w buildzie FFmpeg; Conan włącza libx264 dla domyślnego kodowania AVC/H.264
+i wyłącza m.in. libx265. AAC korzysta z natywnego enkodera FFmpeg.
+Nieznane opcje, błędne wartości, niewłaściwy typ medium oraz niepoprawne ramki
+zwracają kod błędu i log. Parser odrzuca połączenia pakietów z wejściami ramek
+oraz połączenia dekodera audio z enkoderem wideo (i odwrotnie) przed otwarciem plików.
+
+Enkodery zachowują format wejściowy: nie skalują obrazu ani nie konwertują
+pikseli/próbek, częstotliwości czy kanałów. Nieobsługiwany format jest błędem.
+Enkoder audio buforuje próbki w AVAudioFifo, dopasowuje wielkość ramek do kodeka
+oraz wysyła końcowy niepełny blok (lub uzupełnia go ciszą, jeśli kodek wymaga
+pełnej ramki). Znaczniki audio muszą być ciągłe; brakujący początkowy PTS
+jest zastępowany zerem. Time base audio wynosi `1/sample_rate`, a wideo
+zachowuje wejściowy time base (dla MPEG-4 mianownik jest ograniczony do 65535).
+PTS i czas trwania ramek są przeliczane na time base enkodera; frame rate służy
+do uzupełniania czasu trwania pakietów wideo, jeśli kodek zwraca zero.
+
+Przykład pełnego transkodu jest w `examples/transcode.json`:
+`InputNode -> DemuxNode -> (VideoDecoderNode -> VideoEncoderNode,
+AudioDecoderNode -> AudioEncoderNode) -> MuxerNode -> OutputNode`.
+Demux przypisuje porty według kolejności konfiguracji w pliku: przykład zakłada
+wideo na porcie 0 i audio na porcie 1. Jeżeli plik ma odwrotną kolejność,
+zamień połączenia demuxera. Uruchomienie: `./build/graph_worker examples/transcode.json`.
+
+Nody używają [API send/receive FFmpeg](https://ffmpeg.org/doxygen/7.1/group__lavc__encdec.html).
+Obecne kolejki, bufory, FFmpeg i synchroniczne logi nadal nie gwarantują
+ściśle ograniczonego czasu wykonania.
