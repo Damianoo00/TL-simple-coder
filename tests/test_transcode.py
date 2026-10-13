@@ -19,7 +19,13 @@ class TranscodeTests(unittest.TestCase):
     def test_video_with_unused_audio_port(self):
         self.transcode(audio=False)
 
-    def transcode(self, audio):
+    def test_scaled_video_and_resampled_audio(self):
+        self.transcode(audio=True, convert=True)
+
+    def test_scaled_video_with_unused_audio_port(self):
+        self.transcode(audio=False, convert=True)
+
+    def transcode(self, audio, convert=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source, output = root / 'input.mp4', root / 'output.mp4'
@@ -42,9 +48,18 @@ class TranscodeTests(unittest.TestCase):
                 node('MuxerNode', 'mux', {'ports': '2'}, ['output']),
                 node('OutputNode', 'output', {'filename': str(output)}, []),
             ]
+            if convert:
+                graph[2]['connections'] = ['video_scaler']
+                graph[3]['connections'] = ['audio_resampler']
+                graph += [
+                    node('VideoScalerNode', 'video_scaler', {'width': '32', 'height': '24', 'pixel_format': 'yuv420p'}, ['video_encoder']),
+                    node('AudioResamplerNode', 'audio_resampler', {'sample_rate': '44100', 'sample_format': 'fltp', 'channel_layout': 'stereo'}, ['audio_encoder']),
+                ]
             config = root / 'config.json'
             config.write_text(json.dumps({'graph': graph}))
-            worker = subprocess.Popen([str(WORKER), str(config)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            log_path = root / 'worker.log'
+            log_file = log_path.open('w')
+            worker = subprocess.Popen([str(WORKER), str(config)], stdout=subprocess.PIPE, stderr=log_file, text=True)
             try:
                 actual = None
                 deadline = time.monotonic() + 10
@@ -57,10 +72,13 @@ class TranscodeTests(unittest.TestCase):
                             actual = candidate
                             break
                     if worker.poll() is not None:
-                        self.fail(worker.communicate()[1])
+                        worker.communicate()
+                        self.fail(log_path.read_text())
                     time.sleep(0.03)
                 worker.terminate()
-                _, stderr = worker.communicate(timeout=5)
+                worker.communicate(timeout=5)
+                log_file.flush()
+                stderr = log_path.read_text()
                 self.assertEqual(worker.returncode, 0, stderr)
                 self.assertIsNotNone(actual, stderr)
                 self.assertNotIn('code=-', stderr)
@@ -76,13 +94,18 @@ class TranscodeTests(unittest.TestCase):
                 self.assertIn('VideoDecoderNode: decoding finished', stderr)
                 self.assertIn('finalized=yes reason=end_of_stream', stderr)
                 self.assertEqual([s['codec_name'] for s in actual], ['h264', 'aac'] if audio else ['h264'])
-                self.assertEqual((actual[0]['width'], actual[0]['height']), (64, 48))
+                self.assertEqual((actual[0]['width'], actual[0]['height']), (32, 24) if convert else (64, 48))
+                if convert:
+                    self.assertIn('VideoScalerNode: conversion finished', stderr)
+                    if audio:
+                        self.assertIn('AudioResamplerNode: conversion finished', stderr)
                 self.assertAlmostEqual(float(actual[0]['duration']), 1.0, delta=0.02)
                 if audio:
-                    self.assertEqual((actual[1]['sample_rate'], actual[1]['channels']), ('48000', 1))
+                    self.assertEqual((actual[1]['sample_rate'], actual[1]['channels']), ('44100', 2) if convert else ('48000', 1))
                     self.assertAlmostEqual(float(actual[1]['duration']), 1.0, delta=0.05)
                 subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(output), '-f', 'null', '-'], check=True, timeout=10)
             finally:
                 if worker.poll() is None:
                     worker.kill()
                     worker.communicate()
+                log_file.close()

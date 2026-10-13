@@ -13,13 +13,16 @@ add_library(graph_core STATIC
     nodes/DemuxNode.cpp
     nodes/DecoderNode.cpp
     nodes/EncoderNode.cpp
+    nodes/FrameTransformNode.cpp
+    nodes/VideoScalerNode.cpp
+    nodes/AudioResamplerNode.cpp
     nodes/MuxerNode.cpp
     api/JsonGraphParser.cpp
 )
 target_compile_features(graph_core PUBLIC cxx_std_20)
 set_target_properties(graph_core PROPERTIES CXX_EXTENSIONS OFF)
 target_include_directories(graph_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(graph_core PUBLIC Threads::Threads nlohmann_json::nlohmann_json ffmpeg::avformat ffmpeg::avcodec ffmpeg::avutil)
+target_link_libraries(graph_core PUBLIC Threads::Threads nlohmann_json::nlohmann_json ffmpeg::avformat ffmpeg::avcodec ffmpeg::avutil ffmpeg::swscale ffmpeg::swresample)
 
 add_executable(graph_worker api/GraphWorker.cpp)
 target_link_libraries(graph_worker PRIVATE graph_core)
@@ -43,6 +46,10 @@ add_custom_target(run
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(test_frame_conversion tests/test_frame_conversion.cpp)
+    target_link_libraries(test_frame_conversion PRIVATE graph_core)
+    add_test(NAME frame_conversion COMMAND test_frame_conversion)
+    set_tests_properties(frame_conversion PROPERTIES TIMEOUT 20)
     add_executable(test_codec_nodes tests/test_codec_nodes.cpp)
     target_link_libraries(test_codec_nodes PRIVATE graph_core)
     add_test(NAME codec_nodes COMMAND test_codec_nodes)

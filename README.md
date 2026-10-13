@@ -116,7 +116,8 @@ ponownej kompilacji.
 
 Konfiguracja zawiera niepustą tablicę `graph`. Każdy węzeł ma unikalną,
 niepustą nazwę `name`, `type` (`InputNode`, `OutputNode`, `DemuxNode`, `MuxerNode`,
-`VideoDecoderNode`, `AudioDecoderNode`, `VideoEncoderNode` lub `AudioEncoderNode`),
+`VideoDecoderNode`, `AudioDecoderNode`, `VideoEncoderNode`, `AudioEncoderNode`,
+`VideoScalerNode` lub `AudioResamplerNode`),
 tablicę `configuration` obiektów z parametrami tekstowymi oraz tablicę
 `connections` z nazwami następnych węzłów lub obiektami mapowania portów;
 pusta tablica oznacza brak połączeń wychodzących.
@@ -251,7 +252,7 @@ graph.connect(input, output);
 
 `connect()` i `Graph::connect()` sprawdzają zgodność typów kolejek w czasie
 działania. Parser JSON obsługuje konkretne typy `InputNode`, `OutputNode`, `DemuxNode`
-i `MuxerNode` oraz cztery nody dekodowania/kodowania; typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
+i `MuxerNode` oraz nody dekodowania, kodowania i konwersji ramek; typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
 i z wyjścia `OutputNode` przed otwarciem plików.
 W destruktorze własnego węzła wywołaj `stop()` przed zniszczeniem jego zasobów,
 jak robią `InputNode` i `OutputNode`.
@@ -340,7 +341,8 @@ zwracają kod błędu i log. Parser odrzuca połączenia pakietów z wejściami 
 oraz połączenia dekodera audio z enkoderem wideo (i odwrotnie) przed otwarciem plików.
 
 Enkodery zachowują format wejściowy: nie skalują obrazu ani nie konwertują
-pikseli/próbek, częstotliwości czy kanałów. Nieobsługiwany format jest błędem.
+pikseli/próbek, częstotliwości czy kanałów. Nieobsługiwany format jest błędem; przed enkoderem można wstawić
+VideoScalerNode lub AudioResamplerNode.
 Enkoder audio buforuje próbki w AVAudioFifo, dopasowuje wielkość ramek do kodeka
 oraz wysyła końcowy niepełny blok (lub uzupełnia go ciszą, jeśli kodek wymaga
 pełnej ramki). Znaczniki audio muszą być ciągłe; brakujący początkowy PTS
@@ -350,8 +352,8 @@ PTS i czas trwania ramek są przeliczane na time base enkodera; frame rate słu�
 do uzupełniania czasu trwania pakietów wideo, jeśli kodek zwraca zero.
 
 Przykład pełnego transkodu jest w `examples/transcode.json`:
-`InputNode -> DemuxNode -> (VideoDecoderNode -> VideoEncoderNode,
-AudioDecoderNode -> AudioEncoderNode) -> MuxerNode -> OutputNode`.
+`InputNode -> DemuxNode -> (VideoDecoderNode -> VideoScalerNode -> VideoEncoderNode,
+AudioDecoderNode -> AudioResamplerNode -> AudioEncoderNode) -> MuxerNode -> OutputNode`.
 Demux przypisuje porty według kolejności konfiguracji w pliku: przykład zakłada
 wideo na porcie 0 i audio na porcie 1. Jeżeli plik ma odwrotną kolejność,
 zamień połączenia demuxera. Uruchomienie: `./build/graph_worker examples/transcode.json`.
@@ -381,3 +383,47 @@ jeszcze przetwarzać kolejki i opróżniać bufory; zakończenie transkodu potwi
 ich wpisy `encoding finished` i zamknięcie pliku przez OutputNode z
 `finalized=yes reason=end_of_stream`. Anulowanie lub błąd nie generuje wpisu
 InputNode z 100%, jeśli wejście nie dotarło wcześniej do EOF.
+
+### Skalowanie wideo i resampling audio
+
+`VideoScalerNode` korzysta z libswscale, a `AudioResamplerNode` z libswresample.
+Oba mają po jednym wejściu i wyjściu `MediaFrame`, zachowują ID strumienia
+oraz wysyłają docelowy CONFIGFRAME przed danymi. Należy je umieszczać między
+dekoderem a enkoderem odpowiedniego typu. Parser JSON sprawdza zgodność tych
+połączeń przed otwieraniem plików. Biblioteki są włączone w `conanfile.txt`.
+
+| Node | Parametr | Domyślne zachowanie |
+| --- | --- | --- |
+| `VideoScalerNode` | `width`, `height` | rozmiar źródła; podana wartość musi być dodatnia |
+| `VideoScalerNode` | `pixel_format` | `yuv420p`; nazwa formatu FFmpeg |
+| `VideoScalerNode` | `algorithm` | `bilinear`; także `bicubic`, `nearest`, `lanczos` |
+| `AudioResamplerNode` | `sample_rate` | częstotliwość źródła; podana wartość musi być dodatnia |
+| `AudioResamplerNode` | `sample_format` | `fltp`; nazwa formatu FFmpeg, np. `s16`, `flt`, `s16p` |
+| `AudioResamplerNode` | `channel_layout` | układ źródła; np. `mono`, `stereo`, `5.1` |
+
+Scaler zmienia rozdzielczość i format pikseli, zachowując PTS, czas trwania
+ramki, time base i frame rate. Dostosowuje sample aspect ratio do nowych
+wymiarów, aby zachować proporcje wyświetlanego obrazu; nie dodaje pasów ani
+nie kadruje. Ramka wejściowa nie jest modyfikowana.
+
+Resampler zmienia częstotliwość, format próbek i układ kanałów. Wyjściowy
+time base wynosi `1/sample_rate`, PTS rośnie o rzeczywistą liczbę wyjściowych
+próbek, a początkowe przesunięcie czasowe jest zachowane. Audio musi być ciągłe;
+nieciągłość PTS powoduje błąd zamiast automatycznego wstawiania ciszy.
+Przed ENDFRAME resampler opróżnia opóźnione próbki. Pusty strumień wysyła
+CONFIGFRAME i ENDFRAME bez wygenerowanych danych. Zamknięcie kolejki bez EOF
+anuluje konwersję bez opróżniania bufora i generowania sztucznego ENDFRAME.
+
+`examples/transcode.json` zawiera już oba nody z zachowaniem parametrów źródła
+oraz formatami `yuv420p` i `fltp` dla domyślnych enkoderów AVC/AAC.
+`examples/transcode_scaled.json` pokazuje wideo 1280×720 oraz audio 48 kHz stereo:
+
+```sh
+./build/graph_worker examples/transcode_scaled.json
+```
+
+Wymiary, formaty i układ kanałów można zmienić w konfiguracji; wszystkie
+wartości JSON pozostają stringami. Nody logują parametry wejściowe i wyjściowe
+oraz liczby przetworzonych ramek; resampler podaje również liczbę próbek.
+Niepoprawna konfiguracja, ramki i błędy FFmpeg są zgłaszane kodem i logiem.
+Zmiana formatu źródła w środku strumienia wymaga nowej konfiguracji przed startem.

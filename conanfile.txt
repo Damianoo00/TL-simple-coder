@@ -11,8 +11,8 @@ CMakeToolchain
 ffmpeg/*:avdevice=False
 ffmpeg/*:avfilter=False
 ffmpeg/*:postproc=False
-ffmpeg/*:swresample=False
-ffmpeg/*:swscale=False
+ffmpeg/*:swresample=True
+ffmpeg/*:swscale=True
 ffmpeg/*:with_programs=False
 ffmpeg/*:with_ssl=False
 ffmpeg/*:with_zlib=False

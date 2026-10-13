@@ -34,7 +34,7 @@
         }
       ],
       "connections": [
-        "video_encoder"
+        "video_scaler"
       ]
     },
     {
@@ -43,6 +43,31 @@
       "configuration": [
         {
           "threads": "1"
+        }
+      ],
+      "connections": [
+        "audio_resampler"
+      ]
+    },
+    {
+      "type": "VideoScalerNode",
+      "name": "video_scaler",
+      "configuration": [
+        {
+          "pixel_format": "yuv420p",
+          "algorithm": "bilinear"
+        }
+      ],
+      "connections": [
+        "video_encoder"
+      ]
+    },
+    {
+      "type": "AudioResamplerNode",
+      "name": "audio_resampler",
+      "configuration": [
+        {
+          "sample_format": "fltp"
         }
       ],
       "connections": [

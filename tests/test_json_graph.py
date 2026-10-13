@@ -130,7 +130,9 @@ class JsonGraphTests(unittest.TestCase):
 
     def test_incompatible_codec_connections_do_not_truncate_output(self):
         for decoder, encoder in (("VideoDecoderNode", "AudioEncoderNode"),
-                                 ("AudioDecoderNode", "VideoEncoderNode")):
+                                 ("AudioDecoderNode", "VideoEncoderNode"),
+                                 ("VideoDecoderNode", "AudioResamplerNode"),
+                                 ("AudioDecoderNode", "VideoScalerNode")):
             config = {"graph": [
                 {"type": "InputNode", "name": "input", "configuration": [{"filename": "input.mp4"}], "connections": ["decoder"]},
                 {"type": decoder, "name": "decoder", "configuration": [], "connections": ["encoder"]},

@@ -8,6 +8,8 @@
 #include "nodes/AudioDecoderNode.hpp"
 #include "nodes/VideoEncoderNode.hpp"
 #include "nodes/AudioEncoderNode.hpp"
+#include "nodes/VideoScalerNode.hpp"
+#include "nodes/AudioResamplerNode.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -55,7 +57,8 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
         if (definition.type != "InputNode" && definition.type != "OutputNode" &&
             definition.type != "DemuxNode" && definition.type != "MuxerNode" &&
             definition.type != "VideoDecoderNode" && definition.type != "AudioDecoderNode" &&
-            definition.type != "VideoEncoderNode" && definition.type != "AudioEncoderNode") {
+            definition.type != "VideoEncoderNode" && definition.type != "AudioEncoderNode" &&
+            definition.type != "VideoScalerNode" && definition.type != "AudioResamplerNode") {
             throw std::runtime_error("Unknown node type: " + definition.type);
         }
         if (!names.emplace(definition.name, definitions.size()).second) {
@@ -140,11 +143,15 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
             if (connection.input_port >= inputCount(definitions[target->second]))
                 throw std::runtime_error("Invalid input port for node " + connection.target);
             const auto& target_type = definitions[target->second].type;
-            const bool sends_frames = definition.type == "VideoDecoderNode" || definition.type == "AudioDecoderNode";
-            const bool takes_frames = target_type == "VideoEncoderNode" || target_type == "AudioEncoderNode";
+            const bool sends_frames = definition.type == "VideoDecoderNode" || definition.type == "AudioDecoderNode" ||
+                                      definition.type == "VideoScalerNode" || definition.type == "AudioResamplerNode";
+            const bool takes_frames = target_type == "VideoEncoderNode" || target_type == "AudioEncoderNode" ||
+                                      target_type == "VideoScalerNode" || target_type == "AudioResamplerNode";
             if (sends_frames != takes_frames)
                 throw std::runtime_error("Incompatible packet/frame connection from " + definition.name + " to " + connection.target);
-            if (sends_frames && ((definition.type == "VideoDecoderNode") != (target_type == "VideoEncoderNode")))
+            const bool sends_video = definition.type == "VideoDecoderNode" || definition.type == "VideoScalerNode";
+            const bool takes_video = target_type == "VideoEncoderNode" || target_type == "VideoScalerNode";
+            if (sends_frames && sends_video != takes_video)
                 throw std::runtime_error("Incompatible audio/video connection from " + definition.name + " to " + connection.target);
             if (!used_outputs.emplace(connection.output_port, true).second)
                 throw std::runtime_error("Output port is connected more than once");
@@ -189,8 +196,12 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
                 node = &graph->addNode<AudioDecoderNode>();
             } else if (definition.type == "VideoEncoderNode") {
                 node = &graph->addNode<VideoEncoderNode>();
-            } else {
+            } else if (definition.type == "AudioEncoderNode") {
                 node = &graph->addNode<AudioEncoderNode>();
+            } else if (definition.type == "VideoScalerNode") {
+                node = &graph->addNode<VideoScalerNode>();
+            } else {
+                node = &graph->addNode<AudioResamplerNode>();
             }
             try {
                 const int result = node->configure(definition.configuration);
