@@ -1,0 +1,160 @@
+{
+  "graph": [
+    {
+      "type": "InputNode",
+      "name": "input",
+      "configuration": [
+        {
+          "filename": "input.mp4",
+          "loop": "true"
+        }
+      ],
+      "connections": [
+        "demux"
+      ]
+    },
+    {
+      "type": "DemuxNode",
+      "name": "demux",
+      "configuration": [
+        {
+          "ports": "2"
+        }
+      ],
+      "connections": [
+        "video_decoder",
+        "audio_decoder"
+      ]
+    },
+    {
+      "type": "VideoDecoderNode",
+      "name": "video_decoder",
+      "configuration": [
+        {
+          "threads": "1"
+        }
+      ],
+      "connections": [
+        "video_gap_filler"
+      ]
+    },
+    {
+      "type": "AudioDecoderNode",
+      "name": "audio_decoder",
+      "configuration": [
+        {
+          "threads": "1"
+        }
+      ],
+      "connections": [
+        "audio_gap_filler"
+      ]
+    },
+    {
+      "type": "VideoScalerNode",
+      "name": "video_scaler",
+      "configuration": [
+        {
+          "pixel_format": "yuv420p",
+          "algorithm": "bilinear"
+        }
+      ],
+      "connections": [
+        "video_encoder"
+      ]
+    },
+    {
+      "type": "AudioResamplerNode",
+      "name": "audio_resampler",
+      "configuration": [
+        {
+          "sample_format": "fltp"
+        }
+      ],
+      "connections": [
+        "audio_encoder"
+      ]
+    },
+    {
+      "type": "VideoEncoderNode",
+      "name": "video_encoder",
+      "configuration": [
+        {
+          "codec": "libx264",
+          "bit_rate": "2000000",
+          "gop_size": "12",
+          "max_b_frames": "0"
+        }
+      ],
+      "connections": [
+        {
+          "node": "mux",
+          "input_port": 0
+        }
+      ]
+    },
+    {
+      "type": "AudioEncoderNode",
+      "name": "audio_encoder",
+      "configuration": [
+        {
+          "codec": "aac",
+          "bit_rate": "128000"
+        }
+      ],
+      "connections": [
+        {
+          "node": "mux",
+          "input_port": 1
+        }
+      ]
+    },
+    {
+      "type": "MuxerNode",
+      "name": "mux",
+      "configuration": [
+        {
+          "ports": "2"
+        }
+      ],
+      "connections": [
+        "output"
+      ]
+    },
+    {
+      "type": "OutputNode",
+      "name": "output",
+      "configuration": [
+        {
+          "filename": "build/transcode-gap-filled.mp4"
+        }
+      ],
+      "connections": []
+    },
+    {
+      "name": "video_gap_filler",
+      "type": "VideoGapFillerNode",
+      "configuration": [
+        {
+          "max_gap_ms": "10000"
+        }
+      ],
+      "connections": [
+        "video_scaler"
+      ]
+    },
+    {
+      "name": "audio_gap_filler",
+      "type": "AudioGapFillerNode",
+      "configuration": [
+        {
+          "max_gap_ms": "10000"
+        }
+      ],
+      "connections": [
+        "audio_resampler"
+      ]
+    }
+  ],
+  "queue_capacity": 256
+}

@@ -244,3 +244,32 @@ tylko raz; pomiędzy powtórzeniami nie ma ENDFRAME. Graf działa do zatrzymania
 lub błędu. Wejście musi obsługiwać przewijanie i zawierać pakiety z możliwym
 do ustalenia czasem trwania. Postęp odczytu zaczyna się od zera przy każdym
 powtórzeniu. Zapętlenie nie ogranicza szybkości odczytu do czasu rzeczywistego.
+
+### Uzupełnianie przerw w audio i wideo
+
+Dwa osobne węzły obsługują przerwy w PTS zdekodowanych ramek, także na granicy
+zapętlanego pliku, którego strumienie mają różne długości:
+
+- `AudioGapFillerNode`: wstawia dokładną liczbę brakujących próbek ciszy.
+  Umieść go **przed AudioResamplerNode**, np.
+  `AudioDecoderNode → AudioGapFillerNode → AudioResamplerNode → AudioEncoderNode`.
+- `VideoGapFillerNode`: wypełnia przerwę kopiami ostatniego obrazu, korzystając
+  z czasu trwania klatki (lub frame rate z CONFIGFRAME, gdy czas nie jest podany).
+  Umieść go za dekoderem, przed scalerem, overlayem lub enkoderem.
+
+Oba węzły mają jedno wejście i wyjście `MediaFrame` i są dostępne w edytorze.
+Opcjonalny tekstowy parametr `max_gap_ms` jest dodatnią liczbą milisekund,
+domyślnie `"10000"`. Większa przerwa, brak PTS, zmiana formatu lub nakładanie
+się ramek powodują błąd; audio toleruje zaokrąglenie o jedną próbkę, a wideo
+nakładanie o jeden tick time base przy rosnącym PTS. Początkowe przesunięcie
+strumienia jest zachowane. Węzły nie generują danych przed pierwszą ramką ani
+po ostatniej: przerwę wykrywają dopiero po otrzymaniu kolejnej ramki, nie według
+zegara ściennego. Nie wyrównują długości strumieni przy końcowym EOF.
+Pusty strumień zachowuje CONFIGFRAME/ENDFRAME, anulowanie nie generuje EOF.
+
+Przykład: `./build/graph_worker examples/transcode_gap_filled.json`.
+Czyta `input.mp4` w pętli i zapisuje `build/transcode-gap-filled.mp4` do Ctrl+C.
+`queue_capacity: 256` ogranicza buforowanie; dla innych przeplotów strumieni
+limit należy dobrać osobno. Na wyjściu RTMP nadal ustaw `realtime: "true"`.
+EOF kończy węzły normalnie; brak nowych ramek bez EOF nie uruchamia generatora
+ciszy ani obrazu.

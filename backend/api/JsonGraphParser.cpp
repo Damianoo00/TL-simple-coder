@@ -12,6 +12,8 @@
 #include "nodes/VideoScalerNode.hpp"
 #include "nodes/VideoOverlayNode.hpp"
 #include "nodes/AudioResamplerNode.hpp"
+#include "nodes/AudioGapFillerNode.hpp"
+#include "nodes/VideoGapFillerNode.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -70,7 +72,8 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
             definition.type != "DemuxNode" && definition.type != "MuxerNode" &&
             definition.type != "VideoDecoderNode" && definition.type != "AudioDecoderNode" &&
             definition.type != "VideoEncoderNode" && definition.type != "AudioEncoderNode" &&
-            definition.type != "VideoScalerNode" && definition.type != "VideoOverlayNode" && definition.type != "AudioResamplerNode") {
+            definition.type != "VideoScalerNode" && definition.type != "VideoOverlayNode" && definition.type != "AudioResamplerNode" &&
+            definition.type != "AudioGapFillerNode" && definition.type != "VideoGapFillerNode") {
             throw std::runtime_error("Unknown node type: " + definition.type);
         }
         if (!names.emplace(definition.name, definitions.size()).second) {
@@ -161,13 +164,15 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
                 throw std::runtime_error("Invalid input port for node " + connection.target);
             const auto& target_type = definitions[target->second].type;
             const bool sends_frames = definition.type == "VideoDecoderNode" || definition.type == "AudioDecoderNode" ||
-                                      definition.type == "VideoScalerNode" || definition.type == "VideoOverlayNode" || definition.type == "AudioResamplerNode";
+                                      definition.type == "VideoScalerNode" || definition.type == "VideoOverlayNode" || definition.type == "AudioResamplerNode" ||
+                                      definition.type == "AudioGapFillerNode" || definition.type == "VideoGapFillerNode";
             const bool takes_frames = target_type == "VideoEncoderNode" || target_type == "AudioEncoderNode" ||
-                                      target_type == "VideoScalerNode" || target_type == "VideoOverlayNode" || target_type == "AudioResamplerNode";
+                                      target_type == "VideoScalerNode" || target_type == "VideoOverlayNode" || target_type == "AudioResamplerNode" ||
+                                      target_type == "AudioGapFillerNode" || target_type == "VideoGapFillerNode";
             if (sends_frames != takes_frames)
                 throw std::runtime_error("Incompatible packet/frame connection from " + definition.name + " to " + connection.target);
-            const bool sends_video = definition.type == "VideoDecoderNode" || definition.type == "VideoScalerNode" || definition.type == "VideoOverlayNode";
-            const bool takes_video = target_type == "VideoEncoderNode" || target_type == "VideoScalerNode" || target_type == "VideoOverlayNode";
+            const bool sends_video = definition.type == "VideoDecoderNode" || definition.type == "VideoScalerNode" || definition.type == "VideoOverlayNode" || definition.type == "VideoGapFillerNode";
+            const bool takes_video = target_type == "VideoEncoderNode" || target_type == "VideoScalerNode" || target_type == "VideoOverlayNode" || target_type == "VideoGapFillerNode";
             if (sends_frames && sends_video != takes_video)
                 throw std::runtime_error("Incompatible audio/video connection from " + definition.name + " to " + connection.target);
             if (!used_outputs.emplace(connection.output_port, true).second)
@@ -222,6 +227,10 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
                 node = &graph->addNode<VideoScalerNode>();
             } else if (definition.type == "VideoOverlayNode") {
                 node = &graph->addNode<VideoOverlayNode>();
+            } else if (definition.type == "AudioGapFillerNode") {
+                node = &graph->addNode<AudioGapFillerNode>();
+            } else if (definition.type == "VideoGapFillerNode") {
+                node = &graph->addNode<VideoGapFillerNode>();
             } else {
                 node = &graph->addNode<AudioResamplerNode>();
             }

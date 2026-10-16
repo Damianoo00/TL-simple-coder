@@ -110,3 +110,19 @@ test("RTMP sink validates URL and preserves options in graph conversion", () => 
   nodes[1].data.params.url = "http://localhost/live/test";
   assert.match(validate(nodes, edges), /rtmp:\/\//);
 });
+test("gap fillers preserve settings and enforce audio/video port types", () => {
+  const nodes = ["AudioDecoderNode", "AudioGapFillerNode", "AudioResamplerNode",
+    "VideoDecoderNode", "VideoGapFillerNode", "VideoEncoderNode"].map((kind, i) => ({
+      id: String(i), data: { kind, name: String(i), params: { ...catalog[kind].defaults } },
+      position: { x: i * 100, y: 0 },
+    }));
+  const edge = (source, target) => ({source: String(source), target: String(target), sourceHandle: "0", targetHandle: "0"});
+  for (const [a, b] of [[0, 1], [1, 2], [3, 4], [4, 5]])
+    assert.equal(canConnect(edge(a, b), nodes, []), true);
+  for (const [a, b] of [[0, 4], [3, 1], [1, 5], [4, 2]])
+    assert.equal(canConnect(edge(a, b), nodes, []), false);
+  const document = encode("fillers", nodes, [], {});
+  const roundtrip = decode(document);
+  assert.equal(roundtrip.nodes[1].data.params.max_gap_ms, "10000");
+  assert.equal(roundtrip.nodes[4].data.kind, "VideoGapFillerNode");
+});

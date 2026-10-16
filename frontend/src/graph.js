@@ -62,6 +62,16 @@ export const catalog = {
     in: "frame",
     out: "packet",
   },
+  VideoGapFillerNode: {
+    label: "Uzupełnianie wideo", group: "Wideo", icon: "video",
+    description: "Wypełnia przerwy ostatnią klatką",
+    defaults: { max_gap_ms: "10000" }, in: "frame", out: "frame",
+  },
+  AudioGapFillerNode: {
+    label: "Uzupełnianie audio", group: "Audio", icon: "audio",
+    description: "Wypełnia przerwy ciszą",
+    defaults: { max_gap_ms: "10000" }, in: "frame", out: "frame",
+  },
   VideoScalerNode: {
     label: "Skalowanie wideo",
     group: "Wideo",
@@ -124,6 +134,7 @@ export const catalog = {
   },
 };
 export const labels = {
+  max_gap_ms: "Maksymalna przerwa (ms)",
   filename: "Ścieżka pliku",
   ports: "Liczba portów",
   threads: "Wątki",

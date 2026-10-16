@@ -16,6 +16,7 @@ add_library(graph_core STATIC
     nodes/VideoScalerNode.cpp
     nodes/BrowserRenderer.cpp
     nodes/VideoOverlayNode.cpp
+    nodes/GapFillerNodes.cpp
     nodes/AudioResamplerNode.cpp
     nodes/MuxerNode.cpp
     api/JsonGraphParser.cpp
@@ -52,7 +53,7 @@ add_custom_target(run
 )
 
 if(BUILD_TESTING)
-    foreach(unit_test json_graph_parser media_validation output_protocol input_protocol rtmp_output)
+    foreach(unit_test json_graph_parser media_validation output_protocol input_protocol rtmp_output gap_fillers)
         add_executable(test_${unit_test} tests/test_${unit_test}.cpp)
         target_link_libraries(test_${unit_test} PRIVATE graph_core)
         add_test(NAME ${unit_test} COMMAND test_${unit_test})
