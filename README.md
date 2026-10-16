@@ -22,7 +22,42 @@ Grafy można tworzyć w edytorze przeglądarkowym React / React Flow lub opisywa
 w JSON. Supervisor udostępnia edytor i API HTTP, a każdy uruchomiony graf
 przetwarza w osobnym procesie `graph_worker`.
 
-## Jak zbudować
+## Docker Compose — budowanie i uruchomienie jedną komendą
+
+Zainstaluj Docker Engine z Compose, a następnie w katalogu repozytorium wykonaj:
+
+```sh
+docker compose up
+```
+
+Otwórz **http://127.0.0.1:8080**. Pierwsze uruchomienie buduje backend C++,
+uruchamia jego testy, testuje i buduje frontend oraz instaluje renderer Electron.
+Pobranie i kompilacja FFmpeg mogą potrwać kilkanaście minut. Obraz zawiera Xvfb,
+więc overlay nie wymaga sesji graficznej hosta. Serwer strony overlayu uruchom osobno.
+
+Pliki wejściowe umieszczaj w katalogu `media/`. W edytorze ustawiaj ścieżki
+kontenera, np. `/data/media/input.mp4` oraz `/data/media/output.mp4`.
+Wyniki pojawią się w tym samym katalogu na hoście. Proces działa jako użytkownik
+`node` (UID 1000); katalog musi umożliwiać mu odczyt i zapis.
+Przykłady JSON wymagają dostosowania ścieżek plików; przykład overlayu również URL.
+`127.0.0.1` w URL overlayu oznacza kontener. Do strony działającej na hoście
+użyj np. `http://host.docker.internal:3000/overlay.html`; jej serwer musi nasłuchiwać
+na interfejsie dostępnym z sieci Dockera.
+
+Biblioteka grafów jest zachowywana w nazwanym wolumenie `graphs`, także po
+`docker compose down`. `docker compose down -v` usuwa tę bibliotekę.
+Ctrl+C zatrzymuje usługę i workery. API jest wystawione tylko na localhost hosta.
+
+Po zmianach źródeł przebuduj obraz i uruchom usługę:
+
+```sh
+docker compose up --build
+```
+
+Konfiguracja budowania korzysta ze standardowego pola `build` w
+[Docker Compose](https://docs.docker.com/reference/compose-file/build/).
+
+## Jak zbudować lokalnie
 
 Wymagania:
 

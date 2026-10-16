@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+.aws
+.env*
+build
+build-*
+cmake-build-*
+**/node_modules
+frontend/dist
+.venv
+**/__pycache__
+graphs
+media
+*.mp4
+*.log

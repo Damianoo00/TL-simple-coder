@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - graphs:/data/graphs
+      - ./media:/data/media
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: 256mb
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/graphs"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  graphs:
