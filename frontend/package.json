@@ -1,0 +1,23 @@
+{
+  "name": "async-nodes-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test src/graph.test.js"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.9.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "prettier": "^3.9.10",
+    "vite": "^6.0.11"
+  }
+}

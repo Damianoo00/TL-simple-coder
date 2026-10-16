@@ -1,561 +1,165 @@
-# Budowanie i uruchamianie
+# async_nodes
 
-Projekt wymaga systemu POSIX (np. Linux), CMake 3.20 lub nowszego,
-kompilatora z obsługą C++20, Conana 2 oraz Pythona 3 do testów.
-Zależności `nlohmann_json/3.12.0`, `crowcpp-crow/1.3.2` i `ffmpeg/7.1.5` są zadeklarowane
-w `conanfile.txt`. Generatory `CMakeDeps` i `CMakeToolchain` przygotowują
-pakiety i konfigurację dla CMake.
+## Czym jest projekt
+
+async_nodes to projekt C++20 do przetwarzania plików multimedialnych za pomocą
+asynchronicznych grafów. Węzły odczytują, rozdzielają, dekodują, przekształcają,
+kodują i zapisują strumienie audio oraz wideo, korzystając z FFmpeg.
+Obsługiwane są remuksowanie MP4, transkodowanie, skalowanie obrazu,
+resampling audio i nakładanie animowanych stron WWW na wideo.
+
+Grafy można tworzyć w edytorze przeglądarkowym React / React Flow lub opisywać
+w JSON. Supervisor udostępnia edytor i API HTTP, a każdy uruchomiony graf
+przetwarza w osobnym procesie `graph_worker`.
+
+## Jak zbudować
+
+Wymagania:
+
+- system POSIX, np. Linux;
+- CMake 3.20+, kompilator C++20 i Conan 2;
+- Python 3 do testów (domyślnie włączonych);
+- Node.js 22.12+ i npm do edytora oraz renderera overlayów;
+- `ffmpeg` i `ffprobe` w PATH do testów integracyjnych mediów.
+
+Zależności C++ (`nlohmann_json`, Crow i FFmpeg) są zadeklarowane
+w [conanfile.txt](conanfile.txt). Z katalogu projektu wykonaj:
 
 ```sh
-conan profile detect # Tylko przy pierwszym użyciu Conana, jeżeli nie ma profilu default.
+# Tylko przy pierwszym użyciu Conana, jeśli nie masz profilu default:
+conan profile detect
+
 conan install . --output-folder=build/conan --build=missing -s build_type=Release
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=conan/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
-ctest --test-dir build --output-on-failure
-cmake --build build --target run
+
+# Edytor przeglądarkowy:
+npm ci --prefix frontend
+npm run build --prefix frontend
 ```
 
-CMake tworzy dwa oddzielne programy w katalogu `build`:
+CMake tworzy `build/supervisor` i `build/graph_worker`. Do pracy wyłącznie
+z workerem lub API można pominąć budowanie edytora.
 
-- `graph_worker` — uruchamia graf i czeka na SIGTERM lub SIGINT;
-- `supervisor` — udostępnia API HTTP w Crow, uruchamia osobny proces
-  `graph_worker` dla każdego POST i odbiera zakończone procesy przez `waitpid`.
+Dla Debug ustaw `-s build_type=Debug` w Conanie oraz
+`-DCMAKE_BUILD_TYPE=Debug` w CMake. Użyj osobnego katalogu budowania,
+również po zmianie profilu lub toolchaina. Opcje profilu przekazuj do
+`conan install`, np. `-pr:h=default`. Testy można wyłączyć przez
+`-DBUILD_TESTING=OFF` podczas konfiguracji CMake.
 
-Opcje profilu i ustawień przekazuj do `conan install`, np. `-pr:h=default`.
-Dla konfiguracji Debug ustaw `-s build_type=Debug` w Conanie oraz
-`-DCMAKE_BUILD_TYPE=Debug` w CMake; użyj osobnego katalogu budowania.
-Po zmianie profilu lub toolchaina użyj nowego katalogu budowania.
-Testy można wyłączyć opcją CMake `-DBUILD_TESTING=OFF`.
+## Uruchomienie edytora
 
-Bezpośrednie uruchomienie z katalogu projektu:
+Z katalogu projektu:
 
 ```sh
 ./build/supervisor ./build/graph_worker
+# Alternatywnie: cmake --build build --target run
 ```
 
-Można podać bezwzględną ścieżkę workera, aby uruchomić supervisor z innego katalogu:
-
-```sh
-/home/damian/Documents/cpp_testy/async_nodes/build/supervisor /home/damian/Documents/cpp_testy/async_nodes/build/graph_worker
-```
-
-Bez argumentu supervisor używa `./graph_worker` względem bieżącego katalogu.
-Supervisor działa do Ctrl+C lub SIGTERM i wtedy zamyka procesy potomne.
-Wysyła SIGTERM, czeka do 2 sekund na każdego workera, a w razie potrzeby
-używa SIGKILL. Błąd `posix_spawn` daje odpowiedź HTTP 500.
-
-## API Supervisora
-
-Domyślnie API nasłuchuje na `127.0.0.1:8080`. Port możesz podać jako drugi argument:
+Otwórz **http://127.0.0.1:8080**. Supervisor udostępnia edytor i API pod jednym
+adresem. Inny port można podać jako drugi argument, np.:
 
 ```sh
 ./build/supervisor ./build/graph_worker 9090
 ```
 
-Supervisor nie uruchamia grafów automatycznie. Wyślij istniejącą konfigurację:
+Dodaj węzły z palety, połącz porty i ustaw parametry w prawym panelu.
+`Zapisz` utrwala graf, `Start` zapisuje go i uruchamia, a `Stop` zatrzymuje.
+Możesz również importować konfiguracje JSON i eksportować grafy wraz z pozycjami
+węzłów. Dolny panel pokazuje logi ostatniego uruchomienia.
 
-```sh
-curl -i -X POST http://127.0.0.1:8080/graphs \
-  -H 'Content-Type: application/json' \
-  --data-binary @config.json
+Edycja uruchomionego grafu dotyczy kolejnego startu. Niezapisane szkice pozostają
+w pamięci przeglądarki do zamknięcia karty. Biblioteka grafów trafia do `graphs/`
+względem katalogu roboczego supervisora; inny katalog wskazuje zmienna
+`ASYNC_NODES_GRAPH_DIR`. Historia procesów i logi dotyczą bieżącej sesji.
 
-curl http://127.0.0.1:8080/graphs
-curl http://127.0.0.1:8080/graphs/1
-curl -X DELETE http://127.0.0.1:8080/graphs/1
-```
+Supervisor zamkniesz przez Ctrl+C; zatrzyma również procesy potomne.
+API domyślnie działa lokalnie i nie wymaga uwierzytelnienia.
 
-| Endpoint | Wynik |
-|---|---|
-| `POST /graphs` | `202 Accepted`, `graph_id`, `pid`, `status: starting`, nagłówek `Location` |
-| `GET /graphs` | Lista wszystkich grafów z bieżącej sesji, także zakończonych |
-| `GET /graphs/{id}` | Status procesu i opcjonalnie `exit_code` lub `signal`; 404 dla nieznanego ID |
-| `DELETE /graphs/{id}` | Zatrzymanie procesu i jego status; powtórzenie jest bezpieczne; 404 dla nieznanego ID |
+## Uruchomienie grafu z JSON
 
-POST przyjmuje bezpośrednio dokument JSON w formacie `config.json`, bez dodatkowego
-opakowania. Zła składnia lub struktura grafu daje 400, niewłaściwy Content-Type
-415, a body powyżej 1 MiB — 413 (limit jest sprawdzany po odebraniu body).
-Walidacja w supervisorze nie otwiera ani nie nadpisuje plików węzłów.
-Konfiguracja jest zapisywana w prywatnym katalogu tymczasowym i przekazywana jako
-argument do workera. Po zakończeniu procesu plik konfiguracji jest usuwany.
-
-`202` potwierdza utworzenie procesu, a nie gotowość grafu. Status `running` oznacza,
-że proces jeszcze się nie zakończył; nie jest potwierdzeniem zakończenia inicjalizacji.
-Błąd konfiguracji zasobów (np. brak pliku wejściowego) powoduje status `failed`
-z kodem zakończenia. `stopped` oznacza poprawne zakończenie lub zatrzymanie przez API.
-Szczegóły błędów workera trafiają na stderr Supervisora. Rejestr oraz ID są
-przechowywane w pamięci i zaczynają się od nowa po restarcie.
-
-Ścieżki plików węzłów nadal są rozwiązywane względem katalogu roboczego Supervisora.
-Przy wielu grafach nadaj każdemu osobny plik wyjściowy. API jest lokalne i nie
-wymaga uwierzytelnienia; konfiguracje mają dostęp do plików z uprawnieniami procesu.
-
-Sam worker:
-
-```sh
-./build/graph_worker
-# Zakończ przez Ctrl+C.
-
-# Alternatywny plik konfiguracji:
-./build/graph_worker /ścieżka/do/config.json
-```
-
-`cmake --build build --target clean` usuwa skompilowane pliki i programy,
-pozostawiając konfigurację CMake oraz zależności Conana.
-
-Graf jest tworzony przez `JsonGraphParser::parseFile()` na podstawie `config.json`.
-Metoda zwraca `std::unique_ptr<Graph>`; węzły są skonfigurowane i połączone,
-ale ich wątki jeszcze nie pracują. Domyślna konfiguracja ma kolejność
-`InputNode -> OutputNode`. `InputNode::process()` odczytuje jeden
-`AVPacket` przez `av_read_frame()` i przekazuje go jako `DATAFRAME` do kolejki
-następnego węzła. Przed danymi wysyła konfiguracje, a na końcu EOF dla każdego
-strumienia.
-Domyślne ścieżki to `input.mp4` i `output.mp4`, rozwiązywane względem bieżącego
-katalogu. Przygotuj plik wejściowy przed uruchomieniem workera. Każdy worker
-czyta cały plik niezależnie. Zmiana danych lub konfiguracji nie wymaga
-ponownej kompilacji.
-
-Konfiguracja zawiera niepustą tablicę `graph`. Każdy węzeł ma unikalną,
-niepustą nazwę `name`, `type` (`InputNode`, `OutputNode`, `DemuxNode`, `MuxerNode`,
-`VideoDecoderNode`, `AudioDecoderNode`, `VideoEncoderNode`, `AudioEncoderNode`,
-`VideoScalerNode`, `VideoOverlayNode` lub `AudioResamplerNode`),
-tablicę `configuration` obiektów z parametrami tekstowymi oraz tablicę
-`connections` z nazwami następnych węzłów lub obiektami mapowania portów;
-pusta tablica oznacza brak połączeń wychodzących.
-`InputNode` i `OutputNode` wymagają niepustego parametru `filename`.
-Powtarzające się klucze między obiektami `configuration` są odrzucane.
-`InputNode` i `MuxerNode` mają jedno wyjście, `OutputNode` nie ma wyjść,
-a `DemuxNode` ma konfigurowalną liczbę wyjść. Połączenia mogą wskazywać węzły opisane dalej w pliku.
-Parser sprawdza strukturę i wszystkie odwołania przed konfiguracją węzłów;
-błąd konfiguracji jest wypisywany na stderr, a worker kończy się kodem 1.
-Ścieżka konfiguracji oraz względne ścieżki `filename` są rozwiązywane względem
-bieżącego katalogu procesu. Węzły są dodawane w kolejności tablicy `graph`.
-
-Koniec pliku kończy wątek wejściowy; proces workera nadal czeka na sygnał
-zamknięcia. Brak pliku lub niepoprawny plik multimedialny powoduje błąd
-konfiguracji i zakończenie workera z kodem 1.
-
-Do zapisu MP4 służy `OutputNode` (nagłówek `nodes/OutputNode.hpp`).
-Dodaj go jako ostatni węzeł i połącz z poprzednim przed startem grafu:
-
-```cpp
-OutputNode& output = graph.addNode<OutputNode>();
-output.configure({{"filename", "output.mp4"}});
-graph.connect(node2, output);
-```
-
-Konfiguracja tworzy plik lub nadpisuje jego dotychczasową zawartość.
-`OutputNode::process()` odbiera `MediaPacket`, a dla `DATAFRAME` przelicza znaczniki czasu i zapisuje
-pakiet przez `av_interleaved_write_frame()`. Błąd otwarcia zgłasza wyjątkiem,
-a błąd zapisu komunikatem na stderr i zakończeniem wątku. Konfigurację należy
-wykonać przed startem. Przy pracy wielu workerów używaj osobnego pliku dla
-każdego procesu, aby uniknąć nadpisywania wyników.
-
-## Pliki MP4
-
-`InputNode` otwiera plik przez FFmpeg, a `OutputNode` zapisuje kontener MP4.
-Przykład konfiguracji jest w `examples/mp4.json`; ustaw ścieżki do pliku
-wejściowego i wyjściowego:
+Przygotuj plik wejściowy i ustaw ścieżki `filename` w wybranej konfiguracji:
 
 ```sh
 ./build/graph_worker examples/mp4.json
 ```
 
-Wejście odczytuje opis strumieni i skompresowane pakiety przez `libavformat`.
-Kolejki przenoszą `MediaPacket` z polami `type`, `stream_id`, `config` i `packet`:
+Bez argumentu worker używa [config.json](config.json). Względne ścieżki są
+rozwiązywane względem katalogu roboczego procesu. Plik wyjściowy jest nadpisywany:
+używaj innej ścieżki niż wejściowa i osobnych plików dla równoległych grafów.
+Worker kończy się automatycznie po zakończeniu grafu. Ctrl+C przerywa przetwarzanie.
 
-- `CONFIGFRAME` — pole `config` zawiera `MediaStream` z parametrami kodeka i `time_base` danego strumienia;
-- `DATAFRAME` — pole `packet` zawiera `AVPacketPtr`, czyli `std::shared_ptr<AVPacket>` zwalniany przez `av_packet_free()`;
-- `ENDFRAME` — EOF danego strumienia, bez danych.
+| Przykład | Działanie |
+| --- | --- |
+| [mp4.json](examples/mp4.json) | Remuksowanie do MP4 bez ponownego kodowania |
+| [demux_mux.json](examples/demux_mux.json) | Rozdzielenie i ponowne połączenie strumieni |
+| [transcode.json](examples/transcode.json) | Transkodowanie wideo i audio do H.264/AAC |
+| [transcode_scaled.json](examples/transcode_scaled.json) | Wideo 1280×720 i audio 48 kHz stereo |
+| [overlay.json](examples/overlay.json) | Nakładanie strony WWW na wideo w czasie rzeczywistym |
 
-`InputNode` wysyła wszystkie konfiguracje przed danymi, pakiety przeplata
-w kolejności zwracanej przez FFmpeg, a na końcu wysyła EOF dla każdego ID:
+Przykłady z demuxerem zakładają wideo na porcie 0 i audio na porcie 1.
+Jeśli plik ma inną kolejność strumieni, dostosuj połączenia.
 
-```text
-CONFIGFRAME(0), CONFIGFRAME(1), DATAFRAME(0), DATAFRAME(1), ...,
-ENDFRAME(0), ENDFRAME(1)
+Graf można też uruchomić przez działający supervisor:
+
+```sh
+curl -i -X POST http://127.0.0.1:8080/graphs \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/mp4.json
+
+curl http://127.0.0.1:8080/graphs
+curl -X DELETE http://127.0.0.1:8080/graphs/1
 ```
 
-Przeplatanie nie wymaga ścisłej naprzemienności: audio i wideo mogą mieć różną
-liczbę pakietów. ID wejścia odpowiada `AVPacket::stream_index`. Wyjście mapuje
-ID wiadomości na własne indeksy strumieni; ID nie muszą być kolejnymi liczbami.
-Wszystkie konfiguracje muszą poprzedzać pierwszy `DATAFRAME` lub `ENDFRAME`.
-Wyjście odrzuca nieznane ID, powtórzone konfiguracje/EOF, późne konfiguracje
-oraz dane po EOF danego strumienia. Po EOF wszystkich strumieni finalizuje MP4.
+Do zatrzymania użyj `graph_id` zwróconego przez API. Odpowiedź `202` oznacza
+utworzenie procesu; błędy otwarcia mediów mogą pojawić się później w logach.
 
-`InputNode` i `OutputNode` dziedziczą bezpośrednio po abstrakcyjnym `NodeBase`.
-Wejście rejestruje wyjście `MediaPacket`, a wyjście rejestruje wejście
-`MediaPacket`. `ThreadSafeQueue<T>` przenosi typowane wiadomości i dziedziczy
-po `QueueBase`, co pozwala sprawdzać typy połączeń dynamicznych.
-Konfiguracja, dane i EOF przechodzą przez tę samą kolejkę.
-Parametry FFmpeg i zarządzanie jego pamięcią są w `nodes/FFmpeg.hpp`;
-`core/Node.hpp` nie zależy od FFmpeg. `int` zwracany z `process()` jest kodem stanu:
-`NodeBase::Success` (0) oznacza kontynuację, `Finished` (-1) zakończenie,
-a wartości poniżej -1 oznaczają błędy (nazwane kody w `NodeBase::Result`).
-`configure()` również zwraca kod: przed uruchomieniem grafu należy sprawdzić,
-czy zwróciło `Success`. Konstruktor muxera/demuxera z zerową liczbą portów
-zapisuje `InvalidPorts`, dostępny przez `status()`. Błąd konfiguracji lub
-przetwarzania pozostaje zapisany; kolejne `process()` zwraca ten sam kod.
-Poprawna konfiguracja resetuje błąd. Konfigurację wykonuj przed startem,
-a `status()` odczytuj przed startem lub po `wait()` albo `stop()`.
-Wątek węzła zapisuje również kod błędu zwrócony bez użycia `fail()`; wyjątki
-podczas `process()` są zgłaszane jako `MediaError`.
-Log na stderr podaje typ noda, kod, port i ID strumienia; błędy FFmpeg
-zawierają także oryginalny kod, opis i ścieżkę pliku przy operacjach plikowych.
-Parser JSON sprawdza wynik konfiguracji i zgłasza błąd z nazwą noda.
-Wyjątki parsera, walidacji połączeń i alokacji standardowych kontenerów
-pozostają poza tą zmianą. Kolejki nadal blokują i alokują pamięć, a logowanie
-jest synchroniczne; ta zmiana nie zapewnia deterministycznego czasu wykonania.
-Wyjście
-przepisuje wszystkie strumienie do kontenera MP4, zachowując kodeki, audio
-oraz znaczniki czasu. To remuksowanie, bez dekodowania klatek, modyfikacji
-obrazu i ponownego kodowania. Kodeki muszą być obsługiwane przez kontener MP4.
-Opcje Conana wyłączają dodatkowe biblioteki kodeków i urządzenia, których
-remuksowanie nie potrzebuje.
+## Overlay WWW
 
-Po wysłaniu wszystkich `ENDFRAME` wejście zamyka kolejkę. Każdy węzeł po zakończeniu
-pracy zamyka swoje kolejki wyjściowe. Wyjście zapisuje
-końcowy indeks MP4 po EOF wszystkich strumieni i zamyka plik. Po naturalnym
-zakończeniu wszystkich węzłów worker kończy się z kodem 0. Błąd przetwarzania
-zatrzymuje wszystkie gałęzie i kończy proces kodem 1. SIGINT i SIGTERM przerywają
-pracę z kodem 0, chyba że wystąpił błąd węzła. Zatrzymanie grafu przed EOF zamyka kolejki bez generowania
-sztucznego EOF; wyjście finalizuje wtedy odebrane dane jako częściowy plik.
-Plik wyjściowy jest nadpisywany przy konfiguracji; używaj innej ścieżki niż
-plik wejściowy. Testy integracyjne wymagają programów `ffmpeg` i `ffprobe` w PATH
-(w przeciwnym razie są pomijane).
-
-## Uwagi do kodu
-
-- Oba pliki `api/GraphWorker.cpp` i `api/Supervisor.cpp` zawierają `main()`, dlatego
-  muszą być linkowane do oddzielnych programów.
-- `ThreadSafeQueue` po zamknięciu pozwala odebrać pozostałe elementy, a następnie
-  zwraca `std::nullopt`. Kolejki nie można ponownie otworzyć.
-- `NodeBase` i `Graph` są przeznaczone do pojedynczego cyklu uruchomienia.
-  Rejestrację portów, `connect()` i konfigurację należy wykonywać przed startem;
-  zmiana połączeń podczas pracy nie jest synchronizowana.
-- `Graph::stop()` najpierw zamyka kolejki wszystkich węzłów i zgłasza zatrzymanie,
-  a następnie dołącza ich wątki. Zatrzymanie przerywa potok; do pełnego zapisu
-  poczekaj na naturalny EOF. Zamknięcie odblokowuje również producentów czekających
-  na miejsce w ograniczonych kolejkach.
-- `Graph::poll()` zwraca stan `Running`, `Completed`, `Failed` albo `Cancelled`.
-  Przy błędzie podaje indeks węzła w kolejności dodania i kod błędu. Pierwszy
-  zaobserwowany błąd zostaje zachowany; przy jednoczesnym wykryciu kilku błędów
-  wybierany jest węzeł o najniższym indeksie. `Graph::wait()` czeka na naturalne
-  zakończenie i opróżnienie potoku, a przy błędzie przerywa pozostałe gałęzie.
-  `wait()` przed `start()` jest błędem. `poll()`, `wait()`, `stop()` i `start()`
-  wywołuj z jednego wątku sterującego; ich równoległe wywołanie nie jest synchronizowane.
-- Klasa `Supervisor` synchronizuje rejestr procesów, odbiera zakończone dzieci
-  i udostępnia ich kod zakończenia lub sygnał. Nie restartuje workera po awarii.
-- Jest to własny supervisor w C++, niezależny od zewnętrznego `supervisord`.
-
-## Własne węzły
-
-Nowy węzeł dziedziczy bezpośrednio po `NodeBase` i implementuje `process()`.
-W konstruktorze rejestruje swoje kolejki przez `addInput<T>()` i `addOutput<T>()`.
-Przykładowy węzeł może mieć wejście `int` i wyjście `std::string`.
-Dane odbiera przez `input<T>()->pop()` i wysyła przez `output<T>()->push()`.
-Niepołączone wyjście zwraca pusty wskaźnik; sprawdź go, jeśli połączenie jest
-opcjonalne. `NodeBase` zarządza wątkiem, kolejkami i propagacją ich zamknięcia.
-
-```cpp
-auto& input = graph.addNode<InputNode>();
-auto& output = graph.addNode<OutputNode>();
-graph.connect(input, output);
-```
-
-`connect()` i `Graph::connect()` sprawdzają zgodność typów kolejek w czasie
-działania. Parser JSON obsługuje konkretne typy `InputNode`, `OutputNode`, `DemuxNode`
-i `MuxerNode` oraz nody dekodowania, kodowania i konwersji ramek; typ `Node` jest odrzucany. Walidacja odrzuca połączenia do wejścia `InputNode`
-i z wyjścia `OutputNode` przed otwarciem plików.
-W destruktorze własnego węzła wywołaj `stop()` przed zniszczeniem jego zasobów,
-jak robią `InputNode` i `OutputNode`.
-
-## Rozdzielanie i łączenie strumieni
-
-`DemuxNode` ma jedno wejście i domyślnie dwa wyjścia. Kolejne konfiguracje
-przypisuje do kolejnych portów: pierwsze ID do portu 0, drugie do portu 1 itd.
-ID nie musi odpowiadać numerowi portu ani być kolejną liczbą. Wiadomości
-`CONFIGFRAME`, `DATAFRAME` i `ENDFRAME` danego ID trafiają zawsze do tego samego
-wyjścia. Po EOF strumienia jego kolejka jest zamykana. Niewykorzystane porty
-są zamykane po zakończeniu konfiguracji, aby odbiorcy nie czekali bez końca.
-Zbyt mała liczba wyjść lub brak połączenia dla aktywnego strumienia daje błąd.
-
-`MuxerNode` ma domyślnie dwa wejścia i jedno wyjście. Każde wejście przenosi
-jeden strumień. Najpierw odbiera i wysyła wszystkie konfiguracje w kolejności
-portów, potem przeplata dane według DTS (zastępczo PTS) z uwzględnieniem
-`time_base`. Pakiety bez obu znaczników są wybierane w kolejności portów.
-ID oraz zawartość pakietów są zachowywane. EOF wszystkich skonfigurowanych
-strumieni wysyła po ostatnich danych. Nie odtwarza dokładnej kolejności
-nadejścia pakietów z wejściowego pliku — tworzy kolejność według czasu.
-
-Muxer czeka na pierwszy pakiet lub EOF każdego aktywnego wejścia, żeby
-porównać czasy. Wszystkie wejścia należy połączyć; port bez strumienia musi
-mieć zamkniętą kolejkę (DemuxNode robi to automatycznie). Zatrzymanie grafu
-zamyka kolejki i pozwala zakończyć oczekiwanie. Zamknięcie bez `ENDFRAME`
-finalizuje częściowy potok bez generowania sztucznego EOF.
-
-Liczbę portów określa tekstowy parametr `ports`, np. `{"ports": "3"}`,
-albo argument konstruktora w C++:
-
-```cpp
-auto& demux = graph.addNode<DemuxNode>(2);
-auto& mux = graph.addNode<MuxerNode>(2);
-graph.connect(input, demux);
-graph.connect(demux, mux, 0, 0);
-graph.connect(demux, mux, 1, 1);
-graph.connect(mux, output);
-```
-
-W JSON połączenie może być nazwą węzła (numer wyjścia odpowiada pozycji
-w tablicy, wejście ma numer 0) albo obiektem z jawnymi portami:
-
-```json
-"connections": [
-  {"node": "mux", "output_port": 0, "input_port": 0},
-  {"node": "mux", "output_port": 1, "input_port": 1}
-]
-```
-
-Parser sprawdza zakresy portów, powtórzone połączenia i kompletność wejść
-MuxerNode przed otwarciem plików. Przykład całego potoku
-`InputNode -> DemuxNode -> MuxerNode -> OutputNode` znajduje się
-w `examples/demux_mux.json`.
-
-### Dekodowanie i kodowanie
-
-`VideoDecoderNode` i `AudioDecoderNode` przyjmują `MediaPacket` i zwracają
-`MediaFrame` zawierający surowy `AVFrame`. `VideoEncoderNode` i
-`AudioEncoderNode` przyjmują `MediaFrame` i zwracają `MediaPacket`.
-Każdy z tych nodów ma jedno wejście, jedno wyjście i obsługuje jeden strumień.
-Wszystkie zachowują ID strumienia oraz protokół CONFIGFRAME/DATAFRAME/ENDFRAME.
-Surowa konfiguracja opisuje format pikseli lub próbek, wymiary lub układ kanałów,
-time base oraz opcjonalny frame rate. Codec ID w konfiguracji surowej opisuje
-kodek źródłowy, a enkoder wybiera własny kodek wyjściowy.
-
-Dekoder otwiera kodek po CONFIGFRAME; konfigurację wyjściową wysyła przed
-pierwszą zdekodowaną ramką, kiedy znany jest rzeczywisty format. Pusty strumień
-również otrzymuje CONFIGFRAME i ENDFRAME. Przed ENDFRAME nody opróżniają bufory
-kodeka, w tym opóźnione klatki B. Zamknięcie kolejki bez ENDFRAME oznacza
-anulowanie: bufory są zwalniane bez generowania sztucznego EOF.
-
-| Parametr | Dekodery | Enkoder wideo | Enkoder audio |
-| --- | --- | --- | --- |
-| `threads` | dodatnia liczba, domyślnie `1` | domyślnie `1` | domyślnie `1` |
-| `codec` | wybierany z CONFIGFRAME | domyślnie AVC/H.264 (`libx264`) | domyślnie `aac` |
-| `bit_rate` | — | dodatnia liczba bit/s, domyślnie `2000000` | domyślnie `128000` |
-| `gop_size` | — | dodatnia liczba, domyślnie `12` | — |
-| `max_b_frames` | — | `0`–`16`, domyślnie `0` | — |
-
-W JSON wszystkie wartości konfiguracji są stringami. Kodek musi być dostępny
-w buildzie FFmpeg; Conan włącza libx264 dla domyślnego kodowania AVC/H.264
-i wyłącza m.in. libx265. AAC korzysta z natywnego enkodera FFmpeg.
-Nieznane opcje, błędne wartości, niewłaściwy typ medium oraz niepoprawne ramki
-zwracają kod błędu i log. Parser odrzuca połączenia pakietów z wejściami ramek
-oraz połączenia dekodera audio z enkoderem wideo (i odwrotnie) przed otwarciem plików.
-
-Enkodery zachowują format wejściowy: nie skalują obrazu ani nie konwertują
-pikseli/próbek, częstotliwości czy kanałów. Nieobsługiwany format jest błędem; przed enkoderem można wstawić
-VideoScalerNode lub AudioResamplerNode.
-Enkoder audio buforuje próbki w AVAudioFifo, dopasowuje wielkość ramek do kodeka
-oraz wysyła końcowy niepełny blok (lub uzupełnia go ciszą, jeśli kodek wymaga
-pełnej ramki). Znaczniki audio muszą być ciągłe; brakujący początkowy PTS
-jest zastępowany zerem. Time base audio wynosi `1/sample_rate`, a wideo
-zachowuje wejściowy time base (dla MPEG-4 mianownik jest ograniczony do 65535).
-PTS i czas trwania ramek są przeliczane na time base enkodera; frame rate służy
-do uzupełniania czasu trwania pakietów wideo, jeśli kodek zwraca zero.
-
-Przykład pełnego transkodu jest w `examples/transcode.json`:
-`InputNode -> DemuxNode -> (VideoDecoderNode -> VideoScalerNode -> VideoEncoderNode,
-AudioDecoderNode -> AudioResamplerNode -> AudioEncoderNode) -> MuxerNode -> OutputNode`.
-Demux przypisuje porty według kolejności konfiguracji w pliku: przykład zakłada
-wideo na porcie 0 i audio na porcie 1. Jeżeli plik ma odwrotną kolejność,
-zamień połączenia demuxera. Uruchomienie: `./build/graph_worker examples/transcode.json`.
-
-Nody używają [API send/receive FFmpeg](https://ffmpeg.org/doxygen/7.1/group__lavc__encdec.html).
-Obecne kolejki, bufory, FFmpeg i synchroniczne logi nadal nie gwarantują
-ściśle ograniczonego czasu wykonania.
-
-### Dynamiczny overlay WWW w czasie rzeczywistym
-
-`VideoOverlayNode` uruchamia osobny proces Electron/Chromium, który stale renderuje
-HTML, CSS i JavaScript wskazanego URL. WebSockety i animacje działają bez przeładowywania
-strony. Renderer offscreen przekazuje surowy obraz BGRA z premultiplied alpha przez
-prywatne gniazdo Unix. Nie używamy zrzutów PNG/JPEG ani odpytywania strony co klatkę.
-Tryb `cpu` działa bez dedykowanego GPU. Renderer i odbiorca przechowują najnowszy obraz;
-wolniejszy odbiór nie tworzy kolejki historycznych obrazów overlayu.
-
-Potok przykładowy jest w `examples/overlay.json`:
-
-```text
-InputNode → DemuxNode → VideoDecoderNode → VideoOverlayNode
-                                            ↓
-                  VideoScalerNode → VideoEncoderNode → MuxerNode → OutputNode
-                audio z DemuxNode ────────────────────────↑
-```
-
-Przykład zakłada wideo na porcie 0 i audio na porcie 1. Audio jest remuksowane
-bez ponownego kodowania. Wejściem jest `input.mp4`, wyjściem `build/overlay-output.mp4`.
-Przetwarzanie trwa tyle co materiał, ponieważ strona używa czasu rzeczywistego.
-To zapis MP4 w czasie rzeczywistym; przykład nie dodaje podglądu ani transmisji RTMP.
-
-Instalacja renderera wymaga Node.js >=22.12 oraz npm; zależności C++ pozostają bez zmian:
+Przed użyciem `VideoOverlayNode` zainstaluj renderer:
 
 ```sh
 npm ci --prefix overlay-renderer
 npm run setup --prefix overlay-renderer
-cmake --build build -j2
 ```
 
-Electron 44 wymaga osobnego kroku `setup`, który pobiera binarny Chromium.
-Na tym stanowisku Node.js jest również dostępny lokalnie w `build/tooling`:
-
-```sh
-export PATH="$PWD/build/tooling/node-v22.20.0-linux-x64/bin:$PATH"
-```
-
-Uruchom serwer overlayów w pierwszym terminalu:
-
-```sh
-python3 scripts/start_trybuna_overlay.py ~/Documents/Trybuna-Live-Overlays
-```
-
-Skrypt kopiuje źródła do `build/trybuna-overlay`, instaluje zależności, buduje
-aplikację i uruchamia jej serwer. Oryginalny projekt nie jest zmieniany.
-Jeżeli serwer już działa, użyj jego URL w konfiguracji i pomiń ten krok.
-Domyślne adresy: overlay `http://127.0.0.1:3000/overlay.html`,
-kontroler `http://127.0.0.1:3000/controller.html`.
-
-W drugim terminalu:
+Krok `setup` pobiera binarny Electron/Chromium. Na Linuksie renderer wymaga sesji
+graficznej X11/Wayland lub Xvfb. Uruchom serwer strony, ustaw jej URL w konfiguracji
+węzła i wykonaj:
 
 ```sh
 ./build/graph_worker examples/overlay.json
 ```
 
-Zmieniaj wynik, widoczność i pozostałe elementy w kontrolerze podczas przetwarzania.
-Po komunikacie `finalized=yes reason=end_of_stream` plik jest gotowy; worker nadal
-czeka na sygnał, zgodnie z dotychczasowym działaniem. Zakończ go przez Ctrl+C.
+Przykład używa `input.mp4`, zapisuje `build/overlay-output.mp4` i zakłada stronę
+pod `http://127.0.0.1:3000/overlay.html`. Dla projektu Trybuna Live Overlays
+można uruchomić serwer pomocniczym skryptem:
 
-| Parametr `VideoOverlayNode` | Znaczenie |
-| --- | --- |
-| `url` | Wymagany URL HTTP/HTTPS |
-| `width`, `height` | Rozmiar strony; domyślnie `1920`, `1080`, zakres 1–4096 |
-| `fps` | FPS renderera i wyjścia wideo; domyślnie `60`, zakres 1–120 |
-| `render_mode` | `cpu` (domyślnie) lub `gpu` dla akceleracji Chromium |
-| `renderer_executable` | Opcjonalna ścieżka do binarnego Electrona |
-| `renderer_script` | Opcjonalna ścieżka do `overlay-renderer/main.cjs` |
+```sh
+python3 scripts/start_trybuna_overlay.py /ścieżka/do/Trybuna-Live-Overlays
+```
 
-Wartości konfiguracji są stringami. Rozmiar strony Trybuny jest zapisany w jej CSS
-jako 1920×1080; pozostaw taki canvas, także dla mniejszego wideo. Node skaluje overlay
-do rozdzielczości wejścia, zachowując rozdzielczość wideo. Wyjściem są ramki BGRA;
-przed enkoderem H.264 potrzebny jest `VideoScalerNode` z `pixel_format: yuv420p`.
+Skrypt przygotowuje kopię aplikacji w `build/trybuna-overlay`. Przetwarzanie
+overlayu odbywa się w czasie rzeczywistym; gotowy plik potwierdza log
+`finalized=yes reason=end_of_stream`.
 
-Node generuje stały FPS według PTS. Dla wideo 30 FPS i overlayu 60 FPS powtarza
-obraz wideo pomiędzy klatkami, za każdym razem nakładając aktualny obraz strony.
-Nie interpoluje ruchu samego wideo. Zachowuje ID strumienia i początek osi czasu;
-time base wyjścia wynosi `1/fps`. Wymaga monotonicznych PTS. Ostatnią klatkę domyka
-według jej czasu trwania lub wejściowego frame rate. Jeden obraz źródła jest
-buforowany w celu ustalenia przedziału jego prezentacji. Pusty strumień zachowuje
-CONFIGFRAME/ENDFRAME. Renderer musi załadować stronę i dostarczyć pierwszy obraz
-w ciągu 30 sekund; rozłączenie renderera jest błędem przetwarzania.
-
-Pole `queue_capacity` na poziomie dokumentu JSON ogranicza liczbę wiadomości w każdej
-kolejce wejściowej (1–65536). Przykład używa `8`, żeby ograniczyć pamięć i buforowanie.
-Brak pola zachowuje dotychczasowe kolejki bez limitu. Producent czeka na miejsce;
-zamknięcie kolejki odblokowuje zarówno producentów, jak i odbiorców. Dla nietypowego
-przeplotu strumieni trzeba dobrać większy limit, aby demuxer nie blokował dostarczenia
-strumienia, na który czeka muxer. Węzły nadal nie obsługują dowolnych grafów cyklicznych.
-
-Enkoder wideo przyjmuje także `preset` i `tune`, przekazywane do kodeka. Przykład
-wybiera H.264 `ultrafast`, `zerolatency`, dwa wątki i zero klatek B, żeby ograniczyć
-koszt CPU i opóźnienie. Te opcje muszą być obsługiwane przez wybrany kodek.
-
-Logi co pięć sekund pokazują `received_fps`, `video_fps`, `late_frames` i `pts_lag_ms`.
-Statyczna strona może nie wysyłać nowych obrazów; to normalne. `transport_skips`
-oznacza zdarzenia paint podczas zajętego transportu — najnowszy obraz jest wysyłany
-po zakończeniu bieżącego zapisu. Jeżeli `late_frames` lub opóźnienie rosną, sprzęt
-nie utrzymuje wybranego tempa: zmniejsz FPS lub rozdzielczość wideo przed overlayem,
-albo sprawdź `render_mode: gpu`. Sama deklaracja 60 FPS nie gwarantuje wydajności.
-
-Linux wymaga sesji graficznej (X11/Wayland), także dla niewidocznego okna offscreen;
-na serwerze można użyć Xvfb. Sandbox Chromium pozostaje włączony, a strona nie ma
-dostępu do Node.js. Renderer używa osobnego tymczasowego profilu i usuwa go przy
-poprawnym zamknięciu. Ten potok obsługuje programowe ramki SDR; sprzętowe AVFrame
-i kompozycja HDR wymagają osobnej obsługi.
-
-Weryfikacja z uruchomioną **testową kopią** serwera Trybuny:
+## Praca nad projektem i testy
 
 ```sh
 ctest --test-dir build --output-on-failure
-python3 scripts/verify_trybuna_overlay.py
+npm test --prefix frontend
 ```
 
-Test C++ sprawdza premultiplied alpha, przezroczyste i nieprzezroczyste piksele,
-konwersję FPS, PTS, EOF oraz odblokowanie ograniczonej kolejki przy zamknięciu.
-Skrypt z Chromium zmienia wynik i widoczność, zapisuje film 60 FPS z audio i obrazy
-kontrolne w `build`, a następnie przywraca stan kontrolera. Wymaga przykładowego
-`input.mp4`, ffmpeg/ffprobe, działającego serwera i sesji graficznej.
-
-### Logi przetwarzania
-
-Logi trafiają na stderr. Każdy wątek noda wypisuje rozpoczęcie i zakończenie
-przetwarzania z kodem wyniku, liczbą wywołań `process()` zakończonych sukcesem
-oraz czasem pracy. Dekodery i enkodery podają wybrany kodek, ID strumienia
-oraz końcową liczbę ramek i pakietów. OutputNode podaje plik wyjściowy,
-liczbę zapisanych pakietów i informację, czy udało się go sfinalizować.
-
-InputNode wypisuje `read progress=0%` i kolejne wartości po wzroście o co najmniej
-5 punktów procentowych, a `100%` dopiero po EOF i przekazaniu wszystkich ENDFRAME.
-Procent jest obliczany z DTS (lub PTS, jeśli DTS nie istnieje) i czasu trwania
-pakietu w odniesieniu do długości pliku, z uwzględnieniem czasu początkowego
-kontenera. Wartości nie maleją i nie osiągają 100% przed EOF.
-Przy nieznanej długości pojawia się `progress=unavailable reason=unknown_duration`;
-EOF nadal jest raportowane jako zakończenie odczytu (100%).
-
-Ten procent dotyczy odczytu i przekazania materiału do grafu. Enkodery mogą
-jeszcze przetwarzać kolejki i opróżniać bufory; zakończenie transkodu potwierdzają
-ich wpisy `encoding finished` i zamknięcie pliku przez OutputNode z
-`finalized=yes reason=end_of_stream`. Anulowanie lub błąd nie generuje wpisu
-InputNode z 100%, jeśli wejście nie dotarło wcześniej do EOF.
-
-### Skalowanie wideo i resampling audio
-
-`VideoScalerNode` korzysta z libswscale, a `AudioResamplerNode` z libswresample.
-Oba mają po jednym wejściu i wyjściu `MediaFrame`, zachowują ID strumienia
-oraz wysyłają docelowy CONFIGFRAME przed danymi. Należy je umieszczać między
-dekoderem a enkoderem odpowiedniego typu. Parser JSON sprawdza zgodność tych
-połączeń przed otwieraniem plików. Biblioteki są włączone w `conanfile.txt`.
-
-| Node | Parametr | Domyślne zachowanie |
-| --- | --- | --- |
-| `VideoScalerNode` | `width`, `height` | rozmiar źródła; podana wartość musi być dodatnia |
-| `VideoScalerNode` | `pixel_format` | `yuv420p`; nazwa formatu FFmpeg |
-| `VideoScalerNode` | `algorithm` | `bilinear`; także `bicubic`, `nearest`, `lanczos` |
-| `AudioResamplerNode` | `sample_rate` | częstotliwość źródła; podana wartość musi być dodatnia |
-| `AudioResamplerNode` | `sample_format` | `fltp`; nazwa formatu FFmpeg, np. `s16`, `flt`, `s16p` |
-| `AudioResamplerNode` | `channel_layout` | układ źródła; np. `mono`, `stereo`, `5.1` |
-
-Scaler zmienia rozdzielczość i format pikseli, zachowując PTS, czas trwania
-ramki, time base i frame rate. Dostosowuje sample aspect ratio do nowych
-wymiarów, aby zachować proporcje wyświetlanego obrazu; nie dodaje pasów ani
-nie kadruje. Ramka wejściowa nie jest modyfikowana.
-
-Resampler zmienia częstotliwość, format próbek i układ kanałów. Wyjściowy
-time base wynosi `1/sample_rate`, PTS rośnie o rzeczywistą liczbę wyjściowych
-próbek, a początkowe przesunięcie czasowe jest zachowane. Audio musi być ciągłe;
-nieciągłość PTS powoduje błąd zamiast automatycznego wstawiania ciszy.
-Przed ENDFRAME resampler opróżnia opóźnione próbki. Pusty strumień wysyła
-CONFIGFRAME i ENDFRAME bez wygenerowanych danych. Zamknięcie kolejki bez EOF
-anuluje konwersję bez opróżniania bufora i generowania sztucznego ENDFRAME.
-
-`examples/transcode.json` zawiera już oba nody z zachowaniem parametrów źródła
-oraz formatami `yuv420p` i `fltp` dla domyślnych enkoderów AVC/AAC.
-`examples/transcode_scaled.json` pokazuje wideo 1280×720 oraz audio 48 kHz stereo:
+W trybie deweloperskim uruchom supervisor na porcie 8080, a w drugim terminalu:
 
 ```sh
-./build/graph_worker examples/transcode_scaled.json
+npm run dev --prefix frontend
 ```
 
-Wymiary, formaty i układ kanałów można zmienić w konfiguracji; wszystkie
-wartości JSON pozostają stringami. Nody logują parametry wejściowe i wyjściowe
-oraz liczby przetworzonych ramek; resampler podaje również liczbę próbek.
-Niepoprawna konfiguracja, ramki i błędy FFmpeg są zgłaszane kodem i logiem.
-Zmiana formatu źródła w środku strumienia wymaga nowej konfiguracji przed startem.
+Edytor działa wtedy pod **http://127.0.0.1:5173** i przekazuje zapytania API do
+supervisora. Po zmianach interfejsu używanego na porcie 8080 ponownie wykonaj
+`npm run build --prefix frontend`.
+
+Szczegóły testów i pomiaru pokrycia znajdują się w [tests/README.md](tests/README.md).
+Architektura, protokoły węzłów, parametry konfiguracji i opis API są w
+[AGENTS.md](AGENTS.md), wczytywanym automatycznie przez Codexa przy pracy w repozytorium.

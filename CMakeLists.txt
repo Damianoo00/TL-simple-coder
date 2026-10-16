@@ -35,6 +35,8 @@ target_link_libraries(graph_worker PRIVATE graph_core)
 
 add_executable(supervisor api/Supervisor.cpp)
 target_link_libraries(supervisor PRIVATE graph_core Crow::Crow)
+target_compile_definitions(supervisor PRIVATE
+    ASYNC_NODES_FRONTEND_DIR="${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist")
 
 foreach(target graph_core graph_worker supervisor)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)

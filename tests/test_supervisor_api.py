@@ -135,6 +135,9 @@ class SupervisorApiTests(unittest.TestCase):
         path = '/graphs/' + str(graph['graph_id'])
         self.wait_for(lambda: self.request('GET', path)[1]['status'] == 'failed')
         self.assertEqual(self.request('GET', path)[1]['exit_code'], 1)
+        status, logs, _ = self.request('GET', path + '/logs')
+        self.assertEqual(status, 200)
+        self.assertTrue(logs['text'])
 
     def test_runtime_decoder_failure_is_reported(self):
         config = {'graph': [
@@ -187,6 +190,89 @@ class SupervisorApiTests(unittest.TestCase):
         self.assertEqual(body['status'], 'stopped')
         self.assertEqual(body['signal'], signal.SIGKILL)
         self.assertLess(time.monotonic() - started, 4)
+
+    def test_library_persists_updates_and_rejects_invalid_documents(self):
+        document = {'name': 'My graph', 'configuration': self.configuration(),
+                    'editor': {'nodes': [], 'edges': []}}
+        self.assertEqual(self.request('POST', '/library', json.dumps({'name': 'bad'}))[0], 400)
+        self.assertEqual(self.request('POST', '/library', json.dumps(document), 'text/plain')[0], 415)
+        status, created, headers = self.request('POST', '/library', json.dumps(document))
+        self.assertEqual(status, 201)
+        graph_id = created['id']
+        self.assertEqual(headers['Location'], '/library/' + graph_id)
+        self.assertEqual(self.request('GET', '/library')[1], [created])
+        document['name'] = 'Updated'
+        status, saved, _ = self.request('PUT', '/library/' + graph_id, json.dumps(document))
+        self.assertEqual(status, 200)
+        self.assertEqual(saved['name'], 'Updated')
+        self.assertEqual(self.request('GET', '/library/' + graph_id)[1], saved)
+        self.assertEqual(self.request('GET', '/library/invalid-id')[0], 404)
+        self.shutdown()
+        self.process = subprocess.Popen(
+            [str(SUPERVISOR), str(self.worker), str(self.port)],
+            cwd=self.root, stdout=self.log, stderr=self.log)
+        def library_ready():
+            try:
+                return self.request('GET', '/library/' + graph_id)[0] == 200
+            except OSError:
+                return False
+        self.wait_for(library_ready)
+        self.assertEqual(self.request('GET', '/library/' + graph_id)[1], saved)
+        self.assertEqual(self.request('DELETE', '/library/' + graph_id)[0], 200)
+        self.assertEqual(self.request('GET', '/library/' + graph_id)[0], 404)
+
+    def test_saved_graph_start_is_unique_and_logs_survive_exit(self):
+        document = {'name': 'Idle', 'configuration': self.idle_configuration(),
+                    'editor': {'nodes': [], 'edges': []}}
+        status, saved, _ = self.request('POST', '/library', json.dumps(document))
+        self.assertEqual(status, 201)
+        path = '/library/' + saved['id'] + '/start'
+        status, graph, _ = self.request('POST', path)
+        self.assertEqual(status, 202)
+        self.assertEqual(graph['document_id'], saved['id'])
+        graph_path = '/graphs/' + str(graph['graph_id'])
+        self.wait_for(lambda: (self.root / 'idle.mp4').exists())
+        self.assertEqual(self.request('POST', path)[0], 409)
+        self.assertEqual(self.request('GET', graph_path)[1]['document_id'], saved['id'])
+        self.assertEqual(self.request('GET', '/graphs')[1][0]['document_id'], saved['id'])
+        self.assertEqual(self.request('GET', graph_path + '/logs')[0], 200)
+        self.assertEqual(self.request('GET', '/graphs/999/logs')[0], 404)
+        self.assertEqual(self.request('DELETE', graph_path)[0], 200)
+        self.assertEqual(self.request('GET', graph_path + '/logs')[0], 200)
+        self.assertEqual(self.request('POST', path)[0], 202)
+
+    def test_logs_since_offset_and_invalid_query(self):
+        self.worker.unlink()
+        self.worker.write_text('#!/usr/bin/env python3\nimport os, time\nos.write(1, b"hello")\n'
+                               'time.sleep(0.5)\nos.write(2, b" world")\n')
+        self.worker.chmod(0o755)
+        graph = self.start()
+        path = '/graphs/' + str(graph['graph_id']) + '/logs'
+        self.wait_for(lambda: self.request('GET', path)[1]['text'] == 'hello')
+        status, first, _ = self.request('GET', path)
+        self.assertEqual(status, 200)
+        self.assertEqual(first['offset'], 5)
+        self.wait_for(lambda: self.request('GET', path + '?since=5')[1]['text'] == ' world')
+        status, second, _ = self.request('GET', path + '?since=' + str(first['offset']))
+        self.assertEqual(status, 200)
+        self.assertEqual(second, {'text': ' world', 'offset': 11})
+        self.assertEqual(self.request('GET', path + '?since=999999')[1], {'text': '', 'offset': 11})
+        for invalid in ('', '-1', '1x', '18446744073709551616'):
+            self.assertEqual(self.request('GET', path + '?since=' + invalid)[0], 400)
+
+    def test_logs_are_bounded_and_invalid_utf8_is_replaced(self):
+        self.worker.unlink()
+        self.worker.write_text('#!/usr/bin/env python3\nimport os\nos.write(1, b"x" * 70000 + b"\\xff")\n')
+        self.worker.chmod(0o755)
+        graph = self.start()
+        path = '/graphs/' + str(graph['graph_id'])
+        self.wait_for(lambda: self.request('GET', path)[1]['status'] == 'stopped')
+        status, logs, _ = self.request('GET', path + '/logs')
+        self.assertEqual(status, 200)
+        self.assertEqual(logs['offset'], 70001)
+        self.assertLessEqual(len(logs['text']), 65536)
+        self.assertTrue(logs['text'].endswith('\ufffd'))
+        self.assertEqual(self.request('GET', path + '/logs?since=70000')[1]['text'], '\ufffd')
 
 
 if __name__ == '__main__':
