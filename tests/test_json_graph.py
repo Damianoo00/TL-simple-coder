@@ -1,10 +1,11 @@
 import copy
 import json
 import os
+import select
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
-import time
 import unittest
 
 
@@ -37,19 +38,11 @@ class JsonGraphTests(unittest.TestCase):
         process = subprocess.Popen([str(WORKER), *arguments], cwd=self.root,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            deadline = time.monotonic() + 5
+            stdout, stderr = process.communicate(timeout=10)
             output = self.root / "output.mp4"
-            while time.monotonic() < deadline:
-                if output_ready(output):
-                    break
-                if process.poll() is not None:
-                    self.fail("Worker exited before producing output: " + process.communicate()[1])
-                time.sleep(0.02)
+            self.assertEqual(process.returncode, 0, stderr)
             self.assertTrue(output.exists(), "Worker did not create the output file")
             self.assertTrue(output_ready(output), "Worker did not produce a complete MP4")
-            process.terminate()
-            stdout, stderr = process.communicate(timeout=5)
-            self.assertEqual(process.returncode, 0, stderr)
             self.assertIn("Graph started", stdout)
             self.assertIn("Graph stopped", stdout)
         finally:
@@ -155,6 +148,53 @@ class JsonGraphTests(unittest.TestCase):
     def test_missing_input_file(self):
         self.config["graph"][0]["configuration"] = [{"filename": "missing.mp4"}]
         self.assert_rejected(self.write_config(self.config))
+
+    def test_runtime_failure_exits_nonzero(self):
+        self.config["graph"] = [self.config["graph"][0]]
+        self.config["graph"][0]["connections"] = []
+        result = subprocess.run([str(WORKER), str(self.write_config(self.config))],
+                                cwd=self.root, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Graph failed: node=0 code=-3", result.stderr)
+
+    def test_decoder_failure_after_start_exits_nonzero(self):
+        self.config["graph"] = [
+            {"type": "InputNode", "name": "input", "configuration": [{"filename": "input.mp4"}],
+             "connections": ["decoder"]},
+            {"type": "AudioDecoderNode", "name": "decoder", "configuration": [],
+             "connections": ["encoder"]},
+            {"type": "AudioEncoderNode", "name": "encoder", "configuration": [],
+             "connections": ["output"]},
+            {"type": "OutputNode", "name": "output", "configuration": [{"filename": "output.mp4"}],
+             "connections": []},
+        ]
+        result = subprocess.run([str(WORKER), str(self.write_config(self.config))],
+                                cwd=self.root, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Graph started", result.stdout)
+        self.assertIn("Graph failed: node=1 code=-4", result.stderr)
+
+    def test_signals_cancel_running_graph(self):
+        config = {"graph": [{"type": "OutputNode", "name": "idle",
+                             "configuration": [{"filename": "idle.mp4"}], "connections": []}]}
+        path = self.write_config(config)
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=sig):
+                process = subprocess.Popen([str(WORKER), str(path)], cwd=self.root,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    ready, _, _ = select.select([process.stdout], [], [], 5)
+                    self.assertTrue(ready, "Worker did not announce startup")
+                    self.assertIn("Graph started", process.stdout.readline())
+                    self.assertIsNone(process.poll())
+                    process.send_signal(sig)
+                    stdout, stderr = process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, 0, stderr)
+                    self.assertIn("Graph stopped", stdout)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
 
 
 if __name__ == "__main__":

@@ -24,14 +24,17 @@ public:
         LateConfigFrame = -14, FrameBeforeConfig = -15,
         FrameAfterEnd = -16, UnknownFrameType = -17, InsufficientPorts = -18
     };
-    // Configuration is only allowed before start. Read status before start or after stop.
+    // Configuration is only allowed before start. Read status before start or after join/stop.
     int status() const { return m_status; }
     virtual int configure(std::unordered_map<std::string, std::string> config);
     virtual int process() = 0;
 
     void start();
+    void join();
     void stop();
     void requestStop();
+    bool finished() const { return m_finished.load(std::memory_order_acquire); }
+    int result() const { return m_result.load(std::memory_order_relaxed); } // Read after finished().
     void setQueueCapacity(std::size_t capacity) {
         for (auto& queue : m_input) queue->setCapacity(capacity);
     }
@@ -81,4 +84,6 @@ private:
     std::vector<std::shared_ptr<QueueBase>> m_output;
     std::vector<std::type_index> m_output_types;
     std::thread m_worker;
+    std::atomic<bool> m_finished{false};
+    std::atomic<int> m_result{Success};
 };

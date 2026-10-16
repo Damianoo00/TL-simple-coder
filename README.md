@@ -196,7 +196,9 @@ czy zwróciło `Success`. Konstruktor muxera/demuxera z zerową liczbą portów
 zapisuje `InvalidPorts`, dostępny przez `status()`. Błąd konfiguracji lub
 przetwarzania pozostaje zapisany; kolejne `process()` zwraca ten sam kod.
 Poprawna konfiguracja resetuje błąd. Konfigurację wykonuj przed startem,
-a `status()` odczytuj przed startem lub po `stop()`.
+a `status()` odczytuj przed startem lub po `wait()` albo `stop()`.
+Wątek węzła zapisuje również kod błędu zwrócony bez użycia `fail()`; wyjątki
+podczas `process()` są zgłaszane jako `MediaError`.
 Log na stderr podaje typ noda, kod, port i ID strumienia; błędy FFmpeg
 zawierają także oryginalny kod, opis i ścieżkę pliku przy operacjach plikowych.
 Parser JSON sprawdza wynik konfiguracji i zgłasza błąd z nazwą noda.
@@ -212,8 +214,10 @@ remuksowanie nie potrzebuje.
 
 Po wysłaniu wszystkich `ENDFRAME` wejście zamyka kolejkę. Każdy węzeł po zakończeniu
 pracy zamyka swoje kolejki wyjściowe. Wyjście zapisuje
-końcowy indeks MP4 po EOF wszystkich strumieni i zamyka plik; worker nadal
-czeka na sygnał. Zatrzymanie grafu przed EOF zamyka kolejki bez generowania
+końcowy indeks MP4 po EOF wszystkich strumieni i zamyka plik. Po naturalnym
+zakończeniu wszystkich węzłów worker kończy się z kodem 0. Błąd przetwarzania
+zatrzymuje wszystkie gałęzie i kończy proces kodem 1. SIGINT i SIGTERM przerywają
+pracę z kodem 0, chyba że wystąpił błąd węzła. Zatrzymanie grafu przed EOF zamyka kolejki bez generowania
 sztucznego EOF; wyjście finalizuje wtedy odebrane dane jako częściowy plik.
 Plik wyjściowy jest nadpisywany przy konfiguracji; używaj innej ścieżki niż
 plik wejściowy. Testy integracyjne wymagają programów `ffmpeg` i `ffprobe` w PATH
@@ -225,13 +229,20 @@ plik wejściowy. Testy integracyjne wymagają programów `ffmpeg` i `ffprobe` w 
   muszą być linkowane do oddzielnych programów.
 - `ThreadSafeQueue` po zamknięciu pozwala odebrać pozostałe elementy, a następnie
   zwraca `std::nullopt`. Kolejki nie można ponownie otworzyć.
-- `NodeBase` i `Graph` są obecnie przeznaczone do pojedynczego cyklu start/stop.
+- `NodeBase` i `Graph` są przeznaczone do pojedynczego cyklu uruchomienia.
   Rejestrację portów, `connect()` i konfigurację należy wykonywać przed startem;
   zmiana połączeń podczas pracy nie jest synchronizowana.
 - `Graph::stop()` najpierw zamyka kolejki wszystkich węzłów i zgłasza zatrzymanie,
   a następnie dołącza ich wątki. Zatrzymanie przerywa potok; do pełnego zapisu
   poczekaj na naturalny EOF. Zamknięcie odblokowuje również producentów czekających
   na miejsce w ograniczonych kolejkach.
+- `Graph::poll()` zwraca stan `Running`, `Completed`, `Failed` albo `Cancelled`.
+  Przy błędzie podaje indeks węzła w kolejności dodania i kod błędu. Pierwszy
+  zaobserwowany błąd zostaje zachowany; przy jednoczesnym wykryciu kilku błędów
+  wybierany jest węzeł o najniższym indeksie. `Graph::wait()` czeka na naturalne
+  zakończenie i opróżnienie potoku, a przy błędzie przerywa pozostałe gałęzie.
+  `wait()` przed `start()` jest błędem. `poll()`, `wait()`, `stop()` i `start()`
+  wywołuj z jednego wątku sterującego; ich równoległe wywołanie nie jest synchronizowane.
 - Klasa `Supervisor` synchronizuje rejestr procesów, odbiera zakończone dzieci
   i udostępnia ich kod zakończenia lub sygnał. Nie restartuje workera po awarii.
 - Jest to własny supervisor w C++, niezależny od zewnętrznego `supervisord`.

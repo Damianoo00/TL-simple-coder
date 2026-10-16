@@ -4,7 +4,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import time
 import unittest
 
 WORKER = Path(os.environ.get('GRAPH_WORKER', Path(__file__).resolve().parents[1] / 'build' / 'graph_worker')).resolve()
@@ -63,15 +62,9 @@ class Mp4Tests(unittest.TestCase):
                     self.assertIsNotNone(protocol_result)
                     self.assertEqual([p['data_hash'] for p in expected['packets']],
                                      [p['data_hash'] for p in protocol_result['packets']])
-                deadline = time.monotonic() + 10
-                actual = None
-                while time.monotonic() < deadline:
-                    actual = self.probe(output)
-                    if actual and len(actual.get('packets', [])) == len(expected['packets']):
-                        break
-                    if worker.poll() is not None:
-                        self.fail(worker.communicate()[1])
-                    time.sleep(0.05)
+                _, stderr = worker.communicate(timeout=10)
+                self.assertEqual(worker.returncode, 0, stderr)
+                actual = self.probe(output)
                 self.assertIsNotNone(actual, 'MP4 must be finalized at EOF before worker termination')
                 for key in ('codec_name', 'codec_type', 'width', 'height', 'sample_rate', 'channels'):
                     self.assertEqual([s.get(key) for s in expected['streams']], [s.get(key) for s in actual['streams']])
@@ -79,9 +72,6 @@ class Mp4Tests(unittest.TestCase):
                 self.assertEqual([tuple(p.get(k) for k in fields) for p in expected['packets']],
                                  [tuple(p.get(k) for k in fields) for p in actual['packets']])
                 subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', str(output), '-f', 'null', '-'], check=True)
-                worker.terminate()
-                _, stderr = worker.communicate(timeout=5)
-                self.assertEqual(worker.returncode, 0, stderr)
                 self.assertNotIn('code=-', stderr)
                 self.assertNotRegex(stderr, r'(?m)^Node: ')
             finally:

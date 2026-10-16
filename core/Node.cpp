@@ -47,13 +47,20 @@ void NodeBase::start() {
             result = MediaError;
             m_status = result;
             std::fprintf(stderr, "Node: %s\n", error.what());
+        } catch (...) {
+            result = MediaError;
+            m_status = result;
+            std::fprintf(stderr, "Node: unknown exception\n");
         }
+        if (result < Finished) m_status = result;
         // An ended consumer must release producers waiting on its bounded input.
         for (auto& input : m_input) input->close();
         closeOutputs();
         const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         std::fprintf(stderr, "[info] %s: processing stopped result=%d steps=%zu elapsed=%.3fs stop_requested=%s\n",
                      nodeType(), result, steps, elapsed, m_stop_requested.load() ? "yes" : "no");
+        m_result.store(result, std::memory_order_relaxed);
+        m_finished.store(true, std::memory_order_release);
     });
 }
 
@@ -65,5 +72,9 @@ void NodeBase::requestStop() {
 
 void NodeBase::stop() {
     requestStop();
+    join();
+}
+
+void NodeBase::join() {
     if (m_worker.joinable()) m_worker.join();
 }

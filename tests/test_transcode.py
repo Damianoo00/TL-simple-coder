@@ -5,7 +5,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import time
 import unittest
 
 WORKER = Path(os.environ.get('GRAPH_WORKER', Path(__file__).resolve().parents[1] / 'build' / 'graph_worker')).resolve()
@@ -61,26 +60,15 @@ class TranscodeTests(unittest.TestCase):
             log_file = log_path.open('w')
             worker = subprocess.Popen([str(WORKER), str(config)], stdout=subprocess.PIPE, stderr=log_file, text=True)
             try:
-                actual = None
-                deadline = time.monotonic() + 10
-                while time.monotonic() < deadline:
-                    result = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-show_streams', '-of', 'json', str(output)],
-                                            capture_output=True, text=True, timeout=5)
-                    if not result.returncode:
-                        candidate = json.loads(result.stdout)['streams']
-                        if candidate and candidate[0].get('nb_read_frames') == '12':
-                            actual = candidate
-                            break
-                    if worker.poll() is not None:
-                        worker.communicate()
-                        self.fail(log_path.read_text())
-                    time.sleep(0.03)
-                worker.terminate()
-                worker.communicate(timeout=5)
+                worker.communicate(timeout=10)
                 log_file.flush()
                 stderr = log_path.read_text()
                 self.assertEqual(worker.returncode, 0, stderr)
-                self.assertIsNotNone(actual, stderr)
+                result = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-show_streams', '-of', 'json', str(output)],
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, stderr + result.stderr)
+                actual = json.loads(result.stdout)['streams']
+                self.assertEqual(actual[0].get('nb_read_frames'), '12', stderr)
                 self.assertNotIn('code=-', stderr)
                 progress = [int(value) for value in re.findall(r'InputNode: read progress=(\d+)%', stderr)]
                 self.assertGreaterEqual(len(progress), 2, stderr)

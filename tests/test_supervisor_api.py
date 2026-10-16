@@ -75,6 +75,12 @@ class SupervisorApiTests(unittest.TestCase):
              'configuration': [{'filename': output}], 'connections': []},
         ]}
 
+    def idle_configuration(self, output='idle.mp4'):
+        return {'graph': [
+            {'name': 'idle', 'type': 'OutputNode',
+             'configuration': [{'filename': output}], 'connections': []},
+        ]}
+
     def start(self, config=None):
         status, body, headers = self.request('POST', '/graphs', json.dumps(config or self.configuration()))
         self.assertEqual(status, 202, body)
@@ -95,13 +101,15 @@ class SupervisorApiTests(unittest.TestCase):
         output = self.root / 'output.mp4'
         self.wait_for(lambda: output_ready(output))
         path = '/graphs/' + str(graph['graph_id'])
-        self.assertEqual(self.request('GET', path)[1]['status'], 'running')
+        self.wait_for(lambda: self.request('GET', path)[1]['status'] == 'stopped')
+        self.assertEqual(self.request('GET', path)[1]['exit_code'], 0)
         self.assertEqual(len(self.request('GET', '/graphs')[1]), 1)
         self.assertEqual(self.request('DELETE', path)[1]['status'], 'stopped')
         self.assertEqual(self.request('DELETE', path)[1]['status'], 'stopped')
         with self.assertRaises(ProcessLookupError):
             os.kill(graph['pid'], 0)
-        second = self.start(self.configuration('second.mp4'))
+        second = self.start(self.idle_configuration('second.mp4'))
+        self.wait_for(lambda: (self.root / 'second.mp4').exists())
         self.shutdown()
         self.assertEqual(self.process.returncode, 0)
         with self.assertRaises(ProcessLookupError):
@@ -128,6 +136,22 @@ class SupervisorApiTests(unittest.TestCase):
         self.wait_for(lambda: self.request('GET', path)[1]['status'] == 'failed')
         self.assertEqual(self.request('GET', path)[1]['exit_code'], 1)
 
+    def test_runtime_decoder_failure_is_reported(self):
+        config = {'graph': [
+            {'name': 'input', 'type': 'InputNode', 'configuration': [{'filename': 'input.mp4'}],
+             'connections': ['decoder']},
+            {'name': 'decoder', 'type': 'AudioDecoderNode', 'configuration': [],
+             'connections': ['encoder']},
+            {'name': 'encoder', 'type': 'AudioEncoderNode', 'configuration': [],
+             'connections': ['output']},
+            {'name': 'output', 'type': 'OutputNode', 'configuration': [{'filename': 'output.mp4'}],
+             'connections': []},
+        ]}
+        graph = self.start(config)
+        path = '/graphs/' + str(graph['graph_id'])
+        self.wait_for(lambda: self.request('GET', path)[1]['status'] == 'failed')
+        self.assertEqual(self.request('GET', path)[1]['exit_code'], 1)
+
     def test_concurrent_starts_use_independent_configurations(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             graphs = list(executor.map(lambda i: self.start(self.configuration(f'output-{i}.mp4')), range(4)))
@@ -136,6 +160,9 @@ class SupervisorApiTests(unittest.TestCase):
         for i in range(4):
             output = self.root / f'output-{i}.mp4'
             self.wait_for(lambda: output_ready(output))
+            path = '/graphs/' + str(graphs[i]['graph_id'])
+            self.wait_for(lambda: self.request('GET', path)[1]['status'] == 'stopped')
+            self.assertEqual(self.request('GET', path)[1]['exit_code'], 0)
 
     def test_spawn_failure_does_not_register_a_graph(self):
         self.worker.unlink()
@@ -150,9 +177,9 @@ class SupervisorApiTests(unittest.TestCase):
         self.assertEqual(status, 202, body)
 
     def test_forced_stop_is_bounded(self):
-        graph = self.start()
-        output = self.root / 'output.mp4'
-        self.wait_for(lambda: output_ready(output))
+        graph = self.start(self.idle_configuration())
+        self.wait_for(lambda: (self.root / 'idle.mp4').exists())
+        self.assertEqual(self.request('GET', '/graphs/' + str(graph['graph_id']))[1]['status'], 'running')
         os.kill(graph['pid'], signal.SIGSTOP)
         started = time.monotonic()
         status, body, _ = self.request('DELETE', '/graphs/' + str(graph['graph_id']))

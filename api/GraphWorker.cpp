@@ -28,17 +28,23 @@ int main(int argc, char* argv[]) try {
     printf("Graph started, PID: %ld\n",
            static_cast<long>(getpid()));
 
-    while (!stop_requested) {
+    while (!stop_requested && graph->poll().state == Graph::State::Running) {
         std::this_thread::sleep_for(
             std::chrono::milliseconds(100)
         );
     }
 
-    graph->stop();
+    if (stop_requested) graph->stop();
+    const auto result = graph->wait();
 
     printf("Graph stopped, PID: %ld\n",
            static_cast<long>(getpid()));
 
+    if (result.state == Graph::State::Failed) {
+        std::fprintf(stderr, "Graph failed: node=%zu code=%d\n",
+                     *result.failedNode, result.error);
+        return 1;
+    }
     return 0;
 } catch (const std::exception& error) {
     std::fprintf(stderr, "Graph worker: %s\n", error.what());
