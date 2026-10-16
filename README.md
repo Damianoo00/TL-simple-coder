@@ -208,3 +208,22 @@ supervisora. Po zmianach interfejsu używanego na porcie 8080 ponownie wykonaj
 Szczegóły testów i pomiaru pokrycia znajdują się w [backend/tests/README.md](backend/tests/README.md).
 Architektura, protokoły węzłów, parametry konfiguracji i opis API są w
 [AGENTS.md](AGENTS.md), wczytywanym automatycznie przez Codexa przy pracy w repozytorium.
+
+# Transmisja RTMP
+
+`RTMPOutputNode` przyjmuje zakodowane pakiety H.264 i AAC i wysyła je jako FLV do
+serwera RTMP. W `examples/rtmp.json` ustaw `filename` pliku wejściowego oraz
+`url` publikacji w postaci `rtmp://host:port/aplikacja/strumień`, a następnie uruchom:
+
+```sh
+./build/graph_worker examples/rtmp.json
+```
+
+Przykład zakłada, że plik wejściowy zawiera H.264 i AAC. Dla innych kodeków
+użyj dekodera, enkodera H.264/AAC oraz `MuxerNode` przed `RTMPOutputNode`.
+Opcja `realtime` ma wartość `true` domyślnie i odmierza czas według DTS/PTS,
+więc plik jest nadawany w tempie rzeczywistym. Ustaw `"realtime": "false"`
+tylko gdy odbiornik ma przyjąć pakiety tak szybko, jak powstają.
+Połączenie sieciowe jest otwierane przy pierwszym pakiecie lub końcu strumienia,
+po otrzymaniu konfiguracji. Błąd sieci zatrzymuje graf. Operacje sieciowe mają
+limit pięciu sekund, a zatrzymanie grafu przerywa oczekiwanie.

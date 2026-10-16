@@ -8,6 +8,7 @@ add_library(graph_core STATIC
     core/Node.cpp
     nodes/InputNode.cpp
     nodes/OutputNode.cpp
+    nodes/RTMPOutputNode.cpp
     nodes/DemuxNode.cpp
     nodes/DecoderNode.cpp
     nodes/EncoderNode.cpp
@@ -51,7 +52,7 @@ add_custom_target(run
 )
 
 if(BUILD_TESTING)
-    foreach(unit_test json_graph_parser media_validation output_protocol input_protocol)
+    foreach(unit_test json_graph_parser media_validation output_protocol input_protocol rtmp_output)
         add_executable(test_${unit_test} tests/test_${unit_test}.cpp)
         target_link_libraries(test_${unit_test} PRIVATE graph_core)
         add_test(NAME ${unit_test} COMMAND test_${unit_test})
@@ -92,7 +93,7 @@ if(BUILD_TESTING)
         FAKE_OVERLAY_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/tests/fake_overlay_renderer.py")
     add_test(NAME overlay_node COMMAND test_overlay_node)
     set_tests_properties(overlay_node PROPERTIES TIMEOUT 10)
-    set_tests_properties(json_graph_parser media_validation output_protocol input_protocol
+    set_tests_properties(json_graph_parser media_validation output_protocol input_protocol rtmp_output
         thread_safe_queue node_lifecycle frame_conversion codec_nodes demux_mux
         typed_nodes overlay_node PROPERTIES LABELS "unit")
     add_test(NAME integration

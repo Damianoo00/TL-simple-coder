@@ -4,6 +4,7 @@
 #include "nodes/DemuxNode.hpp"
 #include "nodes/MuxerNode.hpp"
 #include "nodes/OutputNode.hpp"
+#include "nodes/RTMPOutputNode.hpp"
 #include "nodes/VideoDecoderNode.hpp"
 #include "nodes/AudioDecoderNode.hpp"
 #include "nodes/VideoEncoderNode.hpp"
@@ -65,7 +66,7 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
         NodeDefinition definition;
         definition.name = requiredString(entry, "name");
         definition.type = requiredString(entry, "type");
-        if (definition.type != "InputNode" && definition.type != "OutputNode" &&
+        if (definition.type != "InputNode" && definition.type != "OutputNode" && definition.type != "RTMPOutputNode" &&
             definition.type != "DemuxNode" && definition.type != "MuxerNode" &&
             definition.type != "VideoDecoderNode" && definition.type != "AudioDecoderNode" &&
             definition.type != "VideoEncoderNode" && definition.type != "AudioEncoderNode" &&
@@ -98,6 +99,11 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
             if (file == definition.configuration.end() || file->second.empty()) {
                 throw std::runtime_error("Missing non-empty filename for node " + definition.name);
             }
+        }
+        if (definition.type == "RTMPOutputNode") {
+            const auto url = definition.configuration.find("url");
+            if (url == definition.configuration.end() || !url->second.starts_with("rtmp://") || url->second.size() <= 7)
+                throw std::runtime_error("Missing or invalid rtmp:// url for node " + definition.name);
         }
 
         const auto& connections = entry.at("connections");
@@ -135,7 +141,7 @@ std::vector<NodeDefinition> readDefinitions(const nlohmann::json& document) {
         return 1;
     };
     auto outputCount = [](const NodeDefinition& node) -> std::size_t {
-        if (node.type == "OutputNode") return 0;
+        if (node.type == "OutputNode" || node.type == "RTMPOutputNode") return 0;
         if (node.type == "DemuxNode") return mediaPortCount(node.configuration);
         return 1;
     };
@@ -198,6 +204,8 @@ std::unique_ptr<Graph> JsonGraphParser::parseFile(const std::filesystem::path& f
                 node = &graph->addNode<InputNode>();
             } else if (definition.type == "OutputNode") {
                 node = &graph->addNode<OutputNode>();
+            } else if (definition.type == "RTMPOutputNode") {
+                node = &graph->addNode<RTMPOutputNode>();
             } else if (definition.type == "DemuxNode") {
                 node = &graph->addNode<DemuxNode>();
             } else if (definition.type == "MuxerNode") {

@@ -93,3 +93,20 @@ test("audio frames cannot connect to video consumers", () => {
     false,
   );
 });
+test("RTMP sink validates URL and preserves options in graph conversion", () => {
+  const document = {
+    name: "RTMP",
+    configuration: { graph: [
+      { name: "source", type: "InputNode", configuration: [{ filename: "input.mp4" }], connections: ["sink"] },
+      { name: "sink", type: "RTMPOutputNode", configuration: [{ url: "rtmp://localhost/live/test", realtime: "false" }], connections: [] },
+    ] },
+  };
+  const { nodes, edges } = decode(document);
+  assert.equal(validate(nodes, edges), null);
+  assert.deepEqual(encode("RTMP", nodes, edges).configuration.graph, document.configuration.graph.map((n, i) => ({
+    ...n,
+    connections: i === 0 ? [{ node: "sink", output_port: 0, input_port: 0 }] : [],
+  })));
+  nodes[1].data.params.url = "http://localhost/live/test";
+  assert.match(validate(nodes, edges), /rtmp:\/\//);
+});

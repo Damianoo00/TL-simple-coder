@@ -1,0 +1,17 @@
+{
+  "queue_capacity": 8,
+  "graph": [
+    {
+      "type": "InputNode",
+      "name": "input",
+      "configuration": [{ "filename": "input.mp4" }],
+      "connections": ["rtmp"]
+    },
+    {
+      "type": "RTMPOutputNode",
+      "name": "rtmp",
+      "configuration": [{ "url": "rtmp://127.0.0.1:1935/live/stream", "realtime": "true" }],
+      "connections": []
+    }
+  ]
+}

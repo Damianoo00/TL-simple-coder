@@ -61,6 +61,12 @@ void rejects(const std::string& label, const Json& document, std::string_view ex
 
 void schemaAndConfiguration() {
     accepts("basic packet graph", packetGraph());
+    auto rtmp = packetGraph();
+    rtmp["graph"][1]["type"] = "RTMPOutputNode";
+    rtmp["graph"][1]["configuration"] = Json::array({{{"url", "rtmp://127.0.0.1:1935/live/test"}}});
+    accepts("RTMP packet graph", rtmp);
+    rtmp["graph"][1]["configuration"] = Json::array({{{"url", "https://example.org"}}});
+    rejects("invalid RTMP URL", rtmp, "rtmp:// url");
     for (const auto& [label, document, expected] : std::vector<std::tuple<std::string, Json, std::string>>{
         {"root array", Json::array(), "cannot use at() with array"},
         {"missing graph", Json::object(), "graph"},
@@ -168,12 +174,14 @@ void topologyAndTypes() {
     document = portGraph(); document["graph"][1]["connections"].erase(1);
     rejects("mux requires every input", document, "All MuxerNode input ports must be connected");
 
-    for (const auto& type : {"InputNode", "OutputNode", "DemuxNode", "MuxerNode", "VideoDecoderNode",
+    for (const auto& type : {"InputNode", "OutputNode", "RTMPOutputNode", "DemuxNode", "MuxerNode", "VideoDecoderNode",
                              "AudioDecoderNode", "VideoEncoderNode", "AudioEncoderNode", "VideoScalerNode",
                              "VideoOverlayNode", "AudioResamplerNode"}) {
         auto config = Json::array();
         if (std::string_view(type) == "InputNode" || std::string_view(type) == "OutputNode")
             config = Json::array({{{"filename", "absent.mp4"}}});
+        if (std::string_view(type) == "RTMPOutputNode")
+            config = Json::array({{{"url", "rtmp://127.0.0.1:1935/live/test"}}});
         document = {{"graph", Json::array({node(type, "solo", config)})}};
         if (std::string_view(type) == "MuxerNode")
             rejects("unconnected mux", document, "All MuxerNode input ports must be connected");
@@ -268,6 +276,11 @@ void parseFileAndSideEffects() {
     auto graph = JsonGraphParser::parseFile(config.path);
     require(graph != nullptr, "parseFile returned null graph");
     require(graph->poll().state == Graph::State::Running, "parseFile unexpectedly started or stopped graph");
+    config.write(Json{{"graph", Json::array({node("RTMPOutputNode", "rtmp",
+        Json::array({{{"url", "rtmp://127.0.0.1:1/live/test"}}}))})}}.dump());
+    auto rtmp = JsonGraphParser::parseFile(config.path);
+    require(rtmp != nullptr && rtmp->poll().state == Graph::State::Running,
+            "parseFile tried to connect RTMP before graph start");
 }
 } // namespace
 

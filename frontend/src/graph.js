@@ -17,6 +17,15 @@ export const catalog = {
     in: "packet",
     out: null,
   },
+  RTMPOutputNode: {
+    label: "Wyjście RTMP",
+    group: "Wejście / wyjście",
+    icon: "output",
+    description: "Transmisja H.264/AAC do serwera RTMP",
+    defaults: { url: "rtmp://127.0.0.1:1935/live/stream", realtime: "true" },
+    in: "packet",
+    out: null,
+  },
   DemuxNode: {
     label: "Demuxer",
     group: "Routing",
@@ -125,6 +134,7 @@ export const labels = {
   pixel_format: "Format pikseli",
   algorithm: "Algorytm",
   url: "Adres URL",
+  realtime: "Tempo rzeczywiste (true/false)",
   fps: "Klatki / s",
   render_mode: "Tryb renderowania",
   sample_rate: "Częstotliwość (Hz)",
@@ -247,6 +257,10 @@ export function validate(nodes, edges) {
       !n.data.params.filename?.trim()
     )
       return `${n.id}: podaj ścieżkę pliku.`;
+    if (n.data.kind === "RTMPOutputNode" && !/^rtmp:\/\/.+/.test(n.data.params.url || ""))
+      return `${n.id}: podaj adres rtmp://.`;
+    if (n.data.kind === "RTMPOutputNode" && !["true", "false"].includes(n.data.params.realtime ?? "true"))
+      return `${n.id}: realtime musi mieć wartość true lub false.`;
     if (
       ["DemuxNode", "MuxerNode"].includes(n.data.kind) &&
       (!/^\d+$/.test(n.data.params.ports) ||
