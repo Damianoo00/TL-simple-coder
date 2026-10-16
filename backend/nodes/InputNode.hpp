@@ -27,5 +27,11 @@ private:
     std::size_t m_next_config = 0;
     std::size_t m_next_end = 0;
     bool m_eof = false;
+    bool m_loop = false;
+    bool m_loop_has_packets = false;
+    int64_t m_loop_offset = 0; // AV_TIME_BASE units, shared by all streams.
+    int64_t m_loop_duration = 0;
+    std::vector<int64_t> m_first_timestamp;
+
     std::string m_filename;
 };

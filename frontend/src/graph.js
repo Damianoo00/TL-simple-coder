@@ -4,7 +4,7 @@ export const catalog = {
     group: "Wejście / wyjście",
     icon: "input",
     description: "Odczyt pliku multimedialnego",
-    defaults: { filename: "input.mp4" },
+    defaults: { filename: "input.mp4", loop: "false" },
     in: null,
     out: "packet",
   },

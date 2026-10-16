@@ -227,3 +227,20 @@ tylko gdy odbiornik ma przyjąć pakiety tak szybko, jak powstają.
 Połączenie sieciowe jest otwierane przy pierwszym pakiecie lub końcu strumienia,
 po otrzymaniu konfiguracji. Błąd sieci zatrzymuje graf. Operacje sieciowe mają
 limit pięciu sekund, a zatrzymanie grafu przerywa oczekiwanie.
+
+### Zapętlanie pliku wejściowego
+
+`InputNode` przyjmuje opcjonalny parametr tekstowy `loop`: `"true"` lub `"1"`
+włącza nieskończone powtarzanie pliku, a `"false"` lub `"0"` wyłącza je
+(domyślnie wyłączone). Przykład konfiguracji:
+
+```json
+"configuration": [{"filename": "input.mp4", "loop": "true"}]
+```
+
+Po końcu pliku wejście przewija materiał, zachowuje ID strumieni i przesuwa
+PTS/DTS kolejnych powtórzeń o wspólny czas trwania. Konfiguracje są wysyłane
+tylko raz; pomiędzy powtórzeniami nie ma ENDFRAME. Graf działa do zatrzymania
+lub błędu. Wejście musi obsługiwać przewijanie i zawierać pakiety z możliwym
+do ustalenia czasem trwania. Postęp odczytu zaczyna się od zera przy każdym
+powtórzeniu. Zapętlenie nie ogranicza szybkości odczytu do czasu rzeczywistego.

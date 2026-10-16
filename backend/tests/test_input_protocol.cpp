@@ -89,6 +89,33 @@ int main() {
         require(input.process() == NodeBase::Finished && input.process() == NodeBase::Finished &&
                 input.status() == NodeBase::Success, "Input completion is not stable");
     }
+    for (const auto* value : {"true", "1"}) {
+        InputNode looping;
+        Collector collector;
+        looping.connect(collector);
+        require(looping.configure({{"filename", fixture.path.string()}, {"loop", value}}) == NodeBase::Success,
+                "Loop configuration failed");
+        require(looping.process() == NodeBase::Success &&
+                collector.take().type == MediaPacket::Type::CONFIGFRAME, "Missing loop config");
+        for (int iteration = 0; iteration < 5; ++iteration) {
+            require(looping.process() == NodeBase::Success, "Loop stopped at EOF");
+            auto message = collector.take();
+            require(message.type == MediaPacket::Type::DATAFRAME && message.stream_id == 0,
+                    "Loop repeated config or sent EOF");
+            require(message.packet->pts == iteration * 4 && message.packet->dts == iteration * 4 &&
+                    message.packet->duration == 4, "Loop timestamps are not continuous");
+            require(message.packet->size == 8 && message.packet->data[5] == 0x7f,
+                    "Loop changed payload");
+        }
+        collector.close();
+        require(looping.process() == NodeBase::Finished, "Loop ignored closed output");
+    }
+    for (const auto* value : {"false", "0"}) {
+        require(input.configure({{"filename", fixture.path.string()}, {"loop", value}}) == NodeBase::Success,
+                "Disabled loop configuration failed");
+    }
+    require(input.configure({{"filename", fixture.path.string()}, {"loop", "yes"}}) ==
+            NodeBase::InvalidConfiguration, "Invalid loop option accepted");
     {
         InputNode disconnected;
         require(disconnected.configure({{"filename", fixture.path.string()}}) == NodeBase::Success,

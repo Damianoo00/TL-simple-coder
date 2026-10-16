@@ -6,6 +6,12 @@ int InputNode::configure(std::unordered_map<std::string, std::string> config) {
     const auto entry = config.find("filename");
     if (entry == config.end() || entry->second.empty())
         return fail(InvalidConfiguration, "missing non-empty filename");
+    bool loop = false;
+    if (const auto option = config.find("loop"); option != config.end()) {
+        if (option->second == "true" || option->second == "1") loop = true;
+        else if (option->second != "false" && option->second != "0")
+            return fail(InvalidConfiguration, "loop must be true, false, 1 or 0");
+    }
     const auto& filename = entry->second;
     AVFormatContext* raw = nullptr;
     if (logMediaResult(avformat_open_input(&raw, filename.c_str(), nullptr, nullptr),
@@ -32,6 +38,11 @@ int InputNode::configure(std::unordered_map<std::string, std::string> config) {
     m_streams = std::move(streams);
     m_next_config = m_next_end = 0;
     m_eof = m_finished = m_progress_started = false;
+    m_loop = loop;
+    m_loop_has_packets = false;
+    m_loop_offset = 0;
+    m_loop_duration = m_media->duration > 0 ? m_media->duration : 0;
+    m_first_timestamp.assign(m_streams.size(), AV_NOPTS_VALUE);
     m_packets_read = 0;
     m_last_progress = -1;
     m_status = Success;
@@ -87,7 +98,22 @@ int InputNode::process() {
         auto raw = av_packet_alloc();
         if (!raw) return fail(AllocationFailed, "cannot allocate input packet");
         AVPacketPtr packet(raw, [](AVPacket* p) { av_packet_free(&p); });
-        const int result = av_read_frame(m_media, packet.get());
+        int result = av_read_frame(m_media, packet.get());
+        if (result == AVERROR_EOF && m_loop) {
+            if (!m_loop_has_packets || m_loop_duration <= 0)
+                return fail(MediaError, "cannot loop empty input or input without a known timeline");
+            const auto start = m_media->start_time == AV_NOPTS_VALUE ? 0 : m_media->start_time;
+            if (logMediaResult(av_seek_frame(m_media, -1, start, AVSEEK_FLAG_BACKWARD),
+                               "InputNode: cannot rewind " + m_filename) < 0)
+                return fail(MediaError, "cannot rewind looped input");
+            m_loop_offset += m_loop_duration;
+            m_loop_has_packets = false;
+            m_last_progress = -1;
+            logProgress(0);
+            result = av_read_frame(m_media, packet.get());
+            if (result == AVERROR_EOF)
+                return fail(MediaError, "looped input has no packets after rewind");
+        }
         if (result != AVERROR_EOF) {
             if (logMediaResult(result, "InputNode: cannot read " + m_filename) < 0)
                 return fail(MediaError, "cannot read input packet");
@@ -95,6 +121,20 @@ int InputNode::process() {
             if (id < 0 || static_cast<std::size_t>(id) >= m_streams.size())
                 return fail(InvalidStreamId, "input packet references an unknown stream", 0, id);
             const int percent = progressPercent(*packet);
+            if (m_loop) {
+                m_loop_has_packets = true;
+                const auto time_base = m_streams[id].time_base;
+                const auto timestamp = packet->dts != AV_NOPTS_VALUE ? packet->dts : packet->pts;
+                if (timestamp != AV_NOPTS_VALUE) {
+                    if (m_first_timestamp[id] == AV_NOPTS_VALUE) m_first_timestamp[id] = timestamp;
+                    const auto span = timestamp - m_first_timestamp[id] + std::max<int64_t>(packet->duration, 1);
+                    m_loop_duration = std::max(m_loop_duration,
+                        av_rescale_q_rnd(span, time_base, AV_TIME_BASE_Q, AV_ROUND_UP));
+                }
+                const auto offset = av_rescale_q(m_loop_offset, AV_TIME_BASE_Q, time_base);
+                if (packet->pts != AV_NOPTS_VALUE) packet->pts += offset;
+                if (packet->dts != AV_NOPTS_VALUE) packet->dts += offset;
+            }
             const int sent = send(MediaPacket::dataFrame(id, std::move(packet)));
             if (sent == Success) {
                 ++m_packets_read;
