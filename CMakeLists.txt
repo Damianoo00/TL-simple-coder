@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(async_nodes LANGUAGES CXX)
+project(TL-simple-coder LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)

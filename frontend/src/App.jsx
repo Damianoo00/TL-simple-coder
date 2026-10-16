@@ -272,7 +272,7 @@ export default function App() {
     setSelected(null);
     setError("");
     setNotice("");
-    setTimeout(() => flow.fitView({ padding: 0.25, duration: 250 }), 70);
+    setTimeout(() => flow.fitView({ padding: 0.25, duration: 250, maxZoom: 1 }), 70);
   }
   function fresh(template = initialDocument) {
     if (
@@ -297,7 +297,7 @@ export default function App() {
     setSelected(null);
     setNotice("");
     setError("");
-    setTimeout(() => flow.fitView({ padding: 0.3 }), 70);
+    setTimeout(() => flow.fitView({ padding: 0.3, maxZoom: 1 }), 70);
   }
   async function action(fn) {
     setBusy(true);
@@ -436,13 +436,13 @@ export default function App() {
   return (
     <div className="studio">
       <header className="app-header">
-        <a className="brand" href="/" aria-label="Async Nodes Studio">
+        <a className="brand" href="/" aria-label="Trybuna Live Simple Coder">
           <span className="brand-mark">
             <GitBranch size={22} />
           </span>
           <span>
-            ASYNC<span className="brand-dot">.</span>NODES
-            <small>GRAPH STUDIO</small>
+            TL<span className="brand-dot">-</span>simple-coder
+            <small>Trybuna Live Simple Coder</small>
           </span>
         </a>
         <div className="header-divider" />
@@ -618,7 +618,7 @@ export default function App() {
               <button
                 title="Dopasuj widok"
                 aria-label="Dopasuj widok"
-                onClick={() => flow.fitView({ padding: 0.2, duration: 250 })}
+                onClick={() => flow.fitView({ padding: 0.2, duration: 250, maxZoom: 1 })}
               >
                 <Maximize2 size={15} />
               </button>
@@ -693,6 +693,7 @@ export default function App() {
               onNodeClick={(_, n) => setSelected(n.id)}
               onPaneClick={() => setSelected(null)}
               fitView
+              fitViewOptions={{ maxZoom: 1 }}
               minZoom={0.15}
               maxZoom={2}
               deleteKeyCode={["Backspace", "Delete"]}
@@ -962,7 +963,7 @@ export default function App() {
       </div>
       <footer className="statusbar">
         <span>
-          <Activity size={12} /> ASYNC NODES <b>STUDIO</b>
+          <Activity size={12} /> TRYBUNA LIVE <b>SIMPLE CODER</b>
         </span>
         <span>
           <i className="packet-dot" /> Pakiety <i className="frame-dot" /> Ramki

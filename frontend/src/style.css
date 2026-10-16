@@ -6,6 +6,9 @@
   font-synthesis: none;
   --cyan: #1db8cc;
   --red: #e24b4a;
+  --red-text: #ffaaa6;
+  --red-border: #75403f;
+  --red-surface: #301c21;
   --muted: #788b94;
   --border: #1a2b33;
   --card: #0c171c;
@@ -94,6 +97,7 @@ fieldset {
   gap: 16px;
   background: #0b151a;
   border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 2px var(--red);
 }
 .brand {
   color: #f2f6f7;
@@ -111,12 +115,12 @@ fieldset {
 .brand-mark {
   display: grid;
   place-items: center;
-  color: var(--cyan);
-  border: 1px solid #20525b;
+  color: var(--red-text);
+  border: 1px solid var(--red-border);
   border-radius: 7px;
   width: 37px;
   height: 37px;
-  background: #0c252c;
+  background: var(--red-surface);
 }
 .brand-dot {
   color: var(--red);
@@ -124,7 +128,7 @@ fieldset {
 .brand small {
   display: block;
   font-family: "Barlow", sans-serif;
-  letter-spacing: 3.2px;
+  letter-spacing: 1px;
   font-size: 8px;
   font-weight: 500;
   color: #79909b;
@@ -182,9 +186,14 @@ fieldset {
   background: #47c9da;
 }
 .header-actions .stop {
-  background: #2b1b20;
-  border-color: #513036;
-  color: #eb8888;
+  background: var(--red-surface);
+  border-color: var(--red-border);
+  color: var(--red-text);
+}
+.header-actions .stop:hover:not(:disabled) {
+  background: #54272c;
+  border-color: var(--red);
+  color: #fff;
 }
 .run-status {
   display: flex;
@@ -263,11 +272,16 @@ fieldset {
 }
 .new-graph {
   margin: 0 15px 16px;
-  background: #10272e;
-  border: 1px solid #21505b;
-  color: #62c9d7;
+  background: var(--red-surface);
+  border: 1px solid var(--red-border);
+  color: var(--red-text);
   font-size: 12px;
   padding: 10px;
+}
+.new-graph:hover:not(:disabled) {
+  background: #44252a;
+  border-color: var(--red);
+  color: #ffe1df;
 }
 .search {
   display: flex;
@@ -307,9 +321,9 @@ fieldset {
   text-align: left;
 }
 .graph-item.current {
-  background: #10272e;
-  border-color: #21434d;
-  box-shadow: inset 2px 0 var(--cyan);
+  background: #261b21;
+  border-color: #593238;
+  box-shadow: inset 3px 0 var(--red);
 }
 .graph-item-icon {
   width: 30px;
@@ -321,9 +335,9 @@ fieldset {
   place-items: center;
 }
 .current .graph-item-icon {
-  background: #173c46;
-  color: var(--cyan);
-  border-color: #245461;
+  background: var(--red-surface);
+  color: var(--red-text);
+  border-color: var(--red-border);
 }
 .graph-item-text {
   flex: 1;
@@ -551,7 +565,7 @@ fieldset {
   height: 80px !important;
 }
 .media-node {
-  width: 230px;
+  width: 100px;
   background: #0e1b22;
   border: 1px solid #2b4550;
   border-radius: 7px;
@@ -568,16 +582,21 @@ fieldset {
 .node-top {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 13px 8px;
-  font-size: 13px;
+  gap: 5px;
+  padding: 7px 6px 5px;
+  font-size: 10px;
   font-weight: 600;
+}
+.node-top > span:nth-child(2) {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .node-icon {
   display: grid;
   place-items: center;
-  width: 29px;
-  height: 29px;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
   background: #10313a;
   border: 1px solid #20505b;
   border-radius: 5px;
@@ -589,6 +608,7 @@ fieldset {
   border-color: #44345b;
 }
 .node-menu {
+  display: none;
   margin-left: auto;
   color: #64808e;
   font-size: 16px;
@@ -597,22 +617,25 @@ fieldset {
   font-family: monospace;
   font-size: 9px;
   color: #678592;
-  margin: 0 13px 8px 52px;
+  margin: 0 6px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .node-description {
-  margin: 4px 13px 14px;
+  margin: 3px 6px 7px;
   font-family: monospace;
   font-size: 10px;
   color: #88a4b2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 202px;
+  max-width: 86px;
 }
 .node-ports {
   display: flex;
   justify-content: space-between;
-  padding: 6px 0;
+  padding: 3px 0;
   border-top: 1px solid #20343e;
   font-size: 9px;
   color: #718d9b;
@@ -625,7 +648,7 @@ fieldset {
 }
 .port-row {
   position: relative;
-  padding: 6px 13px;
+  padding: 6px 5px;
 }
 .node-ports > div:last-child {
   text-align: right;
@@ -746,6 +769,12 @@ fieldset {
 .inspector .panel-heading {
   padding: 15px 17px;
   flex-shrink: 0;
+}
+.inspector .panel-heading button:hover:not(:disabled),
+.inspector .panel-heading button:focus-visible,
+.logs-toolbar button:hover:not(:disabled) {
+  color: var(--red-text);
+  background: var(--red-surface);
 }
 .inspector fieldset {
   padding: 0 17px 20px;

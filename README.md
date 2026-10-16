@@ -1,8 +1,8 @@
-# async_nodes
+# TL-simple-coder — Trybuna Live Simple Coder
 
 ## Czym jest projekt
 
-async_nodes to projekt C++20 do przetwarzania plików multimedialnych za pomocą
+Trybuna Live Simple Coder to projekt C++20 do przetwarzania plików multimedialnych za pomocą
 asynchronicznych grafów. Węzły odczytują, rozdzielają, dekodują, przekształcają,
 kodują i zapisują strumienie audio oraz wideo, korzystając z FFmpeg.
 Obsługiwane są remuksowanie MP4, transkodowanie, skalowanie obrazu,
