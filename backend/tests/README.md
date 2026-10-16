@@ -1,4 +1,6 @@
-# Testy
+# Testy backendu
+
+Wszystkie polecenia wykonuj z głównego katalogu repozytorium.
 
 Testy C++ mają etykietę `unit`; testy Python uruchamiające procesy workera,
 supervisora i narzędzia multimedialne mają etykietę `integration`.

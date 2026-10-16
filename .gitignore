@@ -35,7 +35,7 @@ __pycache__/
 *.gcov
 .coverage
 htmlcov/
-/tests/coverage-unit.txt
+/backend/tests/coverage-unit.txt
 
 # Local environment settings and logs
 .env

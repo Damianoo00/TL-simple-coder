@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 
-WORKER = Path(os.environ.get('GRAPH_WORKER', Path(__file__).resolve().parents[1] / 'build' / 'graph_worker')).resolve()
+WORKER = Path(os.environ.get('GRAPH_WORKER', Path(__file__).resolve().parents[2] / 'build' / 'graph_worker')).resolve()
 
 
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'Transcode tests require ffmpeg and ffprobe')

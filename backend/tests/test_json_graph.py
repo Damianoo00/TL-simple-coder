@@ -12,7 +12,7 @@ import unittest
 from media_fixture import HAS_MEDIA_TOOLS, create_input, output_ready
 
 
-WORKER = Path(os.environ.get("GRAPH_WORKER", Path(__file__).resolve().parents[1] / "build" / "graph_worker")).resolve()
+WORKER = Path(os.environ.get("GRAPH_WORKER", Path(__file__).resolve().parents[2] / "build" / "graph_worker")).resolve()
 
 
 @unittest.skipUnless(HAS_MEDIA_TOOLS, 'Tests require ffmpeg and ffprobe')

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarize GCC line coverage for project core/nodes/api sources and headers.
 
-Run an instrumented unit-test build first; see tests/README.md.
+Run an instrumented unit-test build first; see backend/tests/README.md.
 Multiple template instantiations and translation units are merged by source line.
 """
 import argparse
@@ -16,7 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build", type=Path, help="CMake build directory compiled with --coverage")
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[1] / "backend"
     notes = sorted(args.build.resolve().rglob("*.gcno"))
     if not notes:
         parser.error("No .gcno files found; compile with --coverage first")

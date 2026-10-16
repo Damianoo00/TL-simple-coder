@@ -1,5 +1,15 @@
 # TL-simple-coder — Trybuna Live Simple Coder
 
+## Struktura repozytorium
+
+- `backend/` — silnik C++, API HTTP, testy oraz konfiguracja CMake i Conana.
+- `frontend/` — edytor React / React Flow i konfiguracja Vite.
+- `overlay-renderer/` — pomocniczy renderer Electron dla nakładek WWW.
+- `examples/` — przykładowe grafy; `scripts/` — narzędzia developerskie.
+
+Polecenia budowania i uruchamiania wykonuj z głównego katalogu repozytorium.
+Programy backendu są zapisywane w `build/`, a frontend w `frontend/dist/`.
+
 ## Czym jest projekt
 
 Trybuna Live Simple Coder to projekt C++20 do przetwarzania plików multimedialnych za pomocą
@@ -23,13 +33,13 @@ Wymagania:
 - `ffmpeg` i `ffprobe` w PATH do testów integracyjnych mediów.
 
 Zależności C++ (`nlohmann_json`, Crow i FFmpeg) są zadeklarowane
-w [conanfile.txt](conanfile.txt). Z katalogu projektu wykonaj:
+w [backend/conanfile.txt](backend/conanfile.txt). Z katalogu projektu wykonaj:
 
 ```sh
 # Tylko przy pierwszym użyciu Conana, jeśli nie masz profilu default:
 conan profile detect
 
-conan install . --output-folder=build/conan --build=missing -s build_type=Release
+conan install backend --output-folder=build/conan --build=missing -s build_type=Release
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=conan/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
 
@@ -160,6 +170,6 @@ Edytor działa wtedy pod **http://127.0.0.1:5173** i przekazuje zapytania API do
 supervisora. Po zmianach interfejsu używanego na porcie 8080 ponownie wykonaj
 `npm run build --prefix frontend`.
 
-Szczegóły testów i pomiaru pokrycia znajdują się w [tests/README.md](tests/README.md).
+Szczegóły testów i pomiaru pokrycia znajdują się w [backend/tests/README.md](backend/tests/README.md).
 Architektura, protokoły węzłów, parametry konfiguracji i opis API są w
 [AGENTS.md](AGENTS.md), wczytywanym automatycznie przez Codexa przy pracy w repozytorium.

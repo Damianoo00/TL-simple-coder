@@ -13,7 +13,7 @@ import unittest
 from media_fixture import HAS_MEDIA_TOOLS, create_input, output_ready
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WORKER = Path(os.environ.get('GRAPH_WORKER', ROOT / 'build' / 'graph_worker')).resolve()
 SUPERVISOR = Path(os.environ.get('SUPERVISOR', ROOT / 'build' / 'supervisor')).resolve()
 
