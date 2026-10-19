@@ -26,7 +26,7 @@
 
 namespace {
 std::size_t queueCapacity(const nlohmann::json& document) {
-    if (!document.contains("queue_capacity")) return 0;
+    if (!document.contains("queue_capacity")) return QueueBase::DefaultCapacity;
     const auto& value = document.at("queue_capacity");
     if (!value.is_number_integer() ||
         (!value.is_number_unsigned() && value.get<std::int64_t>() <= 0) ||

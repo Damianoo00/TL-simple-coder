@@ -3,6 +3,7 @@
 #include <array>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
@@ -59,10 +60,21 @@ bool BrowserRenderer::start(const std::string& executable, const std::string& sc
     std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
     if (m_listener < 0 || bind(m_listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0 ||
         listen(m_listener, 1) < 0) { stop(); return false; }
-    std::vector<std::string> arguments{executable, script, "--overlay-socket=" + path,
+    std::vector<std::string> arguments{executable};
+    // Pass startup switches before Electron initializes Chromium, rather than
+    // appending them later from the application's JavaScript entry point.
+    const char* noSandbox = std::getenv("ASYNC_NODES_OVERLAY_NO_SANDBOX");
+    if (noSandbox && std::strcmp(noSandbox, "1") == 0) {
+        arguments.emplace_back("--no-sandbox");
+        std::fprintf(stderr, "BrowserRenderer: launching with --no-sandbox (explicit environment opt-in)\n");
+    } else {
+        std::fprintf(stderr, "BrowserRenderer: Chromium sandbox enabled; ASYNC_NODES_OVERLAY_NO_SANDBOX=%s\n",
+            noSandbox ? noSandbox : "<unset>");
+    }
+    arguments.insert(arguments.end(), {script, "--overlay-socket=" + path,
         "--overlay-url=" + url, "--overlay-width=" + std::to_string(width),
         "--overlay-height=" + std::to_string(height), "--overlay-fps=" + std::to_string(fps),
-        "--overlay-mode=" + mode};
+        "--overlay-mode=" + mode});
     std::vector<char*> argv;
     for (auto& argument : arguments) argv.push_back(argument.data());
     argv.push_back(nullptr);

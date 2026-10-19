@@ -9,6 +9,7 @@
 
 class QueueBase {
 public:
+    static constexpr std::size_t DefaultCapacity = 256;
     virtual ~QueueBase() = default;
     virtual void close() = 0;
     virtual void setCapacity(std::size_t capacity) = 0;
@@ -21,7 +22,7 @@ private:
     std::mutex m_mutex;
     std::condition_variable m_cv;
     bool m_closed = false;
-    std::size_t m_capacity = 0;
+    std::size_t m_capacity = QueueBase::DefaultCapacity;
 
 public:
     bool push(T value) {

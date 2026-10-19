@@ -114,5 +114,5 @@
       "connections": []
     }
   ],
-  "queue_capacity": 8
+  "queue_capacity": 256
 }

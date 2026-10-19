@@ -1,5 +1,5 @@
 {
-  "queue_capacity": 8,
+  "queue_capacity": 256,
   "graph": [
     {
       "type": "InputNode",

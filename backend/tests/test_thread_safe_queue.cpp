@@ -23,6 +23,16 @@ void requireThrows(Action action) {
 int main() {
     {
         ThreadSafeQueue<int> queue;
+        for (int i = 0; i < 256; ++i)
+            require(queue.push(i), "Default queue rejected data before capacity");
+        auto producer = std::async(std::launch::async, [&] { return queue.push(256); });
+        const bool blocked = producer.wait_for(20ms) == std::future_status::timeout;
+        queue.close();
+        const bool accepted = producer.get();
+        require(blocked && !accepted, "Default queue must block at 256 elements");
+    }
+    {
+        ThreadSafeQueue<int> queue;
         queue.setCapacity(0);
         for (int i = 0; i < 1000; ++i)
             require(queue.push(i), "Unbounded queue rejected data");

@@ -176,6 +176,21 @@ węzła i wykonaj:
 ./build/graph_worker examples/overlay.json
 ```
 
+Jeżeli Chromium kończy pracę z `Failed to move to new namespace` i
+`Operation not permitted`, środowisko blokuje namespace’y wymagane przez sandbox.
+Sam plik `chrome-sandbox` z uprawnieniami setuid nie usuwa tej blokady.
+W ograniczonym kontenerze można jawnie wyłączyć sandbox renderera:
+
+```sh
+ASYNC_NODES_OVERLAY_NO_SANDBOX=1 docker compose up --build
+```
+
+Dla uruchomienia lokalnego ustaw tę samą zmienną przed poleceniem workera lub
+supervisora. Wartość `1` włącza przełącznik Chromium `--no-sandbox`; używaj tego
+trybu wyłącznie do zaufanych stron overlayu, ponieważ wyłącza izolację procesów
+Chromium. Domyślnie sandbox pozostaje włączony. Aby do niego wrócić w Compose,
+uruchom `docker compose up -d` bez tej zmiennej.
+
 Przykład używa `input.mp4`, zapisuje `build/overlay-output.mp4` i zakłada stronę
 pod `http://127.0.0.1:3000/overlay.html`. Dla projektu Trybuna Live Overlays
 można uruchomić serwer pomocniczym skryptem:
@@ -269,6 +284,8 @@ Pusty strumień zachowuje CONFIGFRAME/ENDFRAME, anulowanie nie generuje EOF.
 
 Przykład: `./build/graph_worker examples/transcode_gap_filled.json`.
 Czyta `input.mp4` w pętli i zapisuje `build/transcode-gap-filled.mp4` do Ctrl+C.
+Domyślna pojemność każdej kolejki wynosi 256 elementów. Pole `queue_capacity`
+w JSON nadpisuje tę wartość, również w istniejących grafach.
 `queue_capacity: 256` ogranicza buforowanie; dla innych przeplotów strumieni
 limit należy dobrać osobno. Na wyjściu RTMP nadal ustaw `realtime: "true"`.
 EOF kończy węzły normalnie; brak nowych ramek bez EOF nie uruchamia generatora

@@ -236,6 +236,7 @@ export function encode(name, nodes, edges, base = {}) {
   return {
     name,
     configuration: {
+      queue_capacity: 256,
       ...base,
       graph: nodes.map((n) => ({
         name: n.id,
@@ -293,12 +294,13 @@ export function validate(nodes, edges) {
 }
 export const initialDocument = {
   name: "Nowy graf",
-  configuration: { graph: [] },
+  configuration: { queue_capacity: 256, graph: [] },
   editor: { positions: {} },
 };
 export const remuxDocument = {
   name: "Remuksowanie MP4",
   configuration: {
+    queue_capacity: 256,
     graph: [
       {
         name: "input",

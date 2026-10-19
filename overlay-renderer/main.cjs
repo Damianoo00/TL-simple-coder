@@ -16,6 +16,10 @@ if (!options.socket || !/^https?:\/\//.test(options.url || '') ||
   console.error('Invalid overlay renderer arguments'); process.exit(1);
 }
 if (options.mode !== 'gpu') app.disableHardwareAcceleration();
+// BrowserRenderer passes --no-sandbox on Electron's startup command line.
+if (process.env.ASYNC_NODES_OVERLAY_NO_SANDBOX === '1') {
+  console.error('[overlay] Chromium sandbox disabled by ASYNC_NODES_OVERLAY_NO_SANDBOX=1; use trusted overlay pages only');
+}
 app.commandLine.appendSwitch('force-device-scale-factor', '1');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
@@ -23,15 +27,25 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'async-overlay-profile-'))
 app.setPath('userData', profile);
 let win, socket, busy = false, loaded = false, pendingImage, quitting = false;
 let sequence = 0n, paints = 0, skipped = 0, transmitted = 0;
+let lastAdjustedSize;
 
 function transmit(image) {
   if (!loaded || !socket || socket.destroyed) return;
   if (busy) { pendingImage = image; skipped++; return; }
   const size = image.getSize();
   if (size.width !== width || size.height !== height) {
-    console.error(`Unexpected bitmap size ${size.width}x${size.height}`); app.exit(1); return;
+    if (!size.width || !size.height) return; // Ignore empty startup paints.
+    const adjustedSize = `${size.width}x${size.height}`;
+    if (lastAdjustedSize !== adjustedSize) {
+      console.error(`[overlay] resizing bitmap ${adjustedSize} to ${width}x${height}`);
+      lastAdjustedSize = adjustedSize;
+    }
+    image = image.resize({ width, height, quality: 'best' });
   }
-  const bitmap = image.toBitmap(); // Chromium's premultiplied BGRA, no PNG/JPEG encoding.
+  const bitmap = image.toBitmap({ scaleFactor: 1 }); // Premultiplied BGRA, no PNG/JPEG encoding.
+  if (bitmap.length !== width * height * 4) {
+    console.error(`Unexpected bitmap byte length ${bitmap.length}`); app.exit(1); return;
+  }
   const header = Buffer.alloc(24);
   header.write('OVL1', 0, 'ascii');
   header.writeUInt32LE(width, 4); header.writeUInt32LE(height, 8);
@@ -54,10 +68,12 @@ app.whenReady().then(() => {
   socket.on('connect', () => {
     win = new BrowserWindow({
       width, height, useContentSize: true, show: false, transparent: true,
+      enableLargerThanScreen: true,
       backgroundColor: '#00000000', frame: false,
       webPreferences: { offscreen: true, backgroundThrottling: false,
         nodeIntegration: false, contextIsolation: true, sandbox: true, zoomFactor: 1 }
     });
+    win.setContentSize(width, height);
     win.webContents.setFrameRate(fps);
     win.webContents.setAudioMuted(true);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
